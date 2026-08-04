@@ -1,0 +1,36 @@
+name: Tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  test:
+    # windows-latest, no ubuntu: la suite crea widgets Tkinter reales (no
+    # simulados) contra un interprete Tcl/Tk de verdad -- un runner Linux
+    # headless necesitaria Xvfb; un runner Windows ya trae una sesion de
+    # escritorio real, que es ademas la plataforma real de esta app.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: mypy --strict
+        run: python -m mypy --strict app main.py scripts tests
+
+      - name: pyflakes
+        run: python -m pyflakes app main.py scripts tests
+
+      - name: pytest
+        run: python -m pytest -q
