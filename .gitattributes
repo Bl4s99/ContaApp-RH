@@ -1,0 +1,4 @@
+# scripts/pre-commit es un script de shell (#!/bin/sh) -- si Windows le
+# convierte los saltos de linea a CRLF, el shebang deja de ser valido en
+# cualquier sistema que no sea Git Bash. Forzar LF para que sea portable.
+scripts/pre-commit text eol=lf

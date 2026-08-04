@@ -1,0 +1,24 @@
+#!/bin/sh
+# Hook de pre-commit: aborta el commit si mypy --strict, pyflakes o pytest
+# fallan, para que nada roto entre en el historial.
+#
+# Git NO activa esto solo al clonar (los hooks nativos de git no viajan
+# con el repositorio) -- tras clonar, cada persona debe copiarlo una vez:
+#
+#   cp scripts/pre-commit .git/hooks/pre-commit
+#
+# (en Windows, con Git Bash o cualquier terminal; no hace falta chmod +x,
+# git en Windows no comprueba el bit de ejecución de los hooks).
+
+set -e
+
+echo "pre-commit: mypy --strict..."
+py -m mypy --strict app main.py scripts tests
+
+echo "pre-commit: pyflakes..."
+py -m pyflakes app main.py scripts tests
+
+echo "pre-commit: pytest..."
+py -m pytest -q
+
+echo "pre-commit: todo limpio, continuando con el commit."

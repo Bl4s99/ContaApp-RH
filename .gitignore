@@ -4,6 +4,7 @@ __pycache__/
 .mypy_cache/
 empleados.db
 backups/
+logs/
 empleados_ficticios.csv
 
 # Binario compilado (PyInstaller) -- se reconstruye desde el .spec versionado,

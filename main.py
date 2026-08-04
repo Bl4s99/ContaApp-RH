@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import smtplib
 import sqlite3
+import sys
 from datetime import date, datetime
 from tkinter import messagebox
 
@@ -10,6 +11,11 @@ from app.backup import BackupRepository, apply_pending_restore
 from app.database import DEFAULT_DB_PATH, get_connection, init_db
 from app.email_digest import send_digest_email
 from app.login import LoginWindow
+from app.logging_config import (
+    configure_logging,
+    install_tk_exception_hook,
+    log_uncaught_exception,
+)
 from app.repository import Repositories
 from app.ui import MainWindow
 
@@ -30,6 +36,15 @@ DEFAULT_ONBOARDING_TASKS = [
 
 
 def main() -> None:
+    # Antes de cualquier otra cosa: si algo revienta luego (incluida la
+    # propia apertura de la base de datos), debe quedar registrado en vez
+    # de desaparecer en silencio -- sobre todo en la versión compilada
+    # --windowed, que no tiene una consola donde ver un traceback.
+    logger = configure_logging()
+    sys.excepthook = log_uncaught_exception
+    install_tk_exception_hook()
+    logger.info("Aplicación iniciada")
+
     # Debe ir antes de abrir ninguna conexión: si hay una restauración de
     # copia de seguridad pendiente (BackupRepository.stage_restore(), desde
     # la sesión anterior), este es el único momento en que sustituir
@@ -62,13 +77,16 @@ def main() -> None:
                 # (disco lleno, permisos, etc.) -- se avisa una vez la
                 # ventana principal ya existe, más abajo.
                 backup_error = str(exc)
+                logger.warning("Fallo al crear la copia de seguridad automática: %s", exc)
 
         login = LoginWindow(repos)
         login.mainloop()
         if login.authenticated_user is None:
-            return  # ventana de login cerrada sin iniciar sesión
+            logger.info("Ventana de inicio de sesión cerrada sin iniciar sesión")
+            return
         repos.audit_log.set_current_user(login.authenticated_user)
         current_user = login.authenticated_user
+        logger.info("Sesión iniciada, rol=%s", current_user.role)
 
         digest_error: str | None = None
         assert current_user.id is not None
@@ -97,6 +115,7 @@ def main() -> None:
                 # Igual que el fallo de backup: no bloquea el arranque, se
                 # avisa una vez exista la ventana principal, más abajo.
                 digest_error = str(exc)
+                logger.warning("Fallo al enviar el resumen semanal por correo: %s", exc)
 
         window = MainWindow(repos, current_user, backups)
         if backup_error is not None:
@@ -116,6 +135,7 @@ def main() -> None:
         window.mainloop()
     finally:
         conn.close()
+        logger.info("Aplicación cerrada")
 
 
 if __name__ == "__main__":

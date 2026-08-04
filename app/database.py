@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import sqlite3
-import sys
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
+
+from app.paths import app_dir
 
 SCHEMA_TABLES = """
 CREATE TABLE IF NOT EXISTS departments (
@@ -378,17 +379,7 @@ CREATE INDEX IF NOT EXISTS idx_assigned_equipment_employee
     ON assigned_equipment(employee_id, assigned_date);
 """
 
-# Compilada con PyInstaller (--onefile), __file__ apunta al directorio
-# temporal de autoextracción (distinto en cada arranque) en vez de a una
-# ubicación estable -- sys.executable, en cambio, sigue siendo el .exe real
-# que se ha hecho doble clic, así que empleados.db se busca junto a él. Sin
-# esta rama, la versión compilada crearía una base de datos nueva y vacía
-# en un directorio temporal diferente cada vez que se abriera la app.
-if getattr(sys, "frozen", False):
-    _APP_DIR = Path(sys.executable).resolve().parent
-else:
-    _APP_DIR = Path(__file__).resolve().parent.parent
-DEFAULT_DB_PATH = _APP_DIR / "empleados.db"
+DEFAULT_DB_PATH = app_dir() / "empleados.db"
 
 
 def get_connection(db_path: Path | str = DEFAULT_DB_PATH) -> sqlite3.Connection:
