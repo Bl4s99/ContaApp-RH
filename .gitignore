@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+empleados.db
+backups/
+empleados_ficticios.csv
+
+# Binario compilado (PyInstaller) -- se reconstruye desde el .spec versionado,
+# no tiene sentido versionar un binario de ~20 MB.
+*.exe
+build/
+dist/
