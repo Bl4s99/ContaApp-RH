@@ -2,6 +2,14 @@
 
 Aplicación de escritorio simple para gestionar empleados. Interfaz en Tkinter, datos en SQLite. Una única dependencia externa en tiempo de ejecución: **Pillow**, para procesar las fotos de empleado.
 
+## Demo interactiva
+
+**[Ver la demo →](https://claude.ai/code/artifact/97f17a62-3e57-4c84-8fa8-8a91f1b379ba)**
+
+Es la forma pensada para explorar la aplicación sin instalar nada: capturas reales de la app, navegables con la misma barra lateral y la misma navegación que la interfaz de verdad, cargadas con datos de una empresa ficticia de ejemplo. No hay ninguna aplicación ni base de datos real corriendo detrás — es solo lectura, no se puede modificar ni guardar nada.
+
+Todo lo de más abajo (instalación, compilar el `.exe`...) es para quien vaya a desplegar su propia instancia real de la aplicación, no un paso necesario para simplemente verla.
+
 Para uso diario (no desarrollo), el acceso directo del escritorio abre un `.exe` compilado — no hace falta tener Python instalado para usar la app, solo para modificarla (ver "Compilar como ejecutable" más abajo).
 
 ## Requisitos
