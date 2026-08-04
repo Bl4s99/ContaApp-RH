@@ -4,6 +4,7 @@ import logging
 import logging.handlers
 import sys
 import tkinter as tk
+from collections.abc import Callable
 from types import TracebackType
 
 from app.paths import app_dir
@@ -59,14 +60,25 @@ def log_uncaught_exception(
     )
 
 
-def install_tk_exception_hook() -> None:
+def install_tk_exception_hook(
+    on_exception: Callable[[type[BaseException], BaseException], None] | None = None,
+) -> None:
     """Sustituye `Tk.report_callback_exception`, el método que Tkinter
     llama para CUALQUIER excepción no controlada dentro de un callback
     (clic de botón, atajo de teclado, etc.). Por defecto solo la imprime a
     stderr -- en la versión compilada `--windowed` no hay stderr visible,
     así que la excepción desaparecía sin dejar rastro. Se sustituye a
     nivel de clase (no en cada ventana por separado) para cubrir tanto
-    `LoginWindow` como `MainWindow` con una sola llamada."""
+    `LoginWindow` como `MainWindow` con una sola llamada.
+
+    `on_exception`, si se indica, se llama DESPUÉS de registrar en el log
+    local -- pensado para app.crash_report.notify_crash_report_recipients,
+    que este módulo deliberadamente no importa (dependencia cero, como el
+    resto de logging_config.py); quien instale el hook decide si hay algo
+    más que hacer aparte de loguear. Un fallo dentro de `on_exception` (ej.
+    sin conexión de red) se registra como aviso y no se propaga: una
+    excepción dentro del manejador de excepciones no debe tapar la
+    original ni reventar Tkinter."""
 
     def _report_callback_exception(
         self: tk.Misc,
@@ -77,6 +89,13 @@ def install_tk_exception_hook() -> None:
         logging.getLogger(LOGGER_NAME).error(
             "Excepción en un callback de la interfaz", exc_info=(exc, val, tb)
         )
+        if on_exception is not None:
+            try:
+                on_exception(exc, val)
+            except Exception:
+                logging.getLogger(LOGGER_NAME).warning(
+                    "Fallo al ejecutar el aviso adicional de excepción", exc_info=True
+                )
 
     # El stub de typeshed tipa este atributo como un Callable YA ligado (sin
     # `self`), pero en tiempo de ejecución una función asignada a nivel de

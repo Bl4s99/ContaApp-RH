@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import os
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
+from app.db_engine import DB_URL_ENV_VAR, DbConnection, PostgresConnection, is_postgres_url
 from app.paths import app_dir
 
 SCHEMA_TABLES = """
@@ -176,14 +178,17 @@ CREATE TABLE IF NOT EXISTS users (
     email_provider TEXT CHECK(email_provider IS NULL OR email_provider IN ('gmail', 'outlook')),
     email_address TEXT,
     email_app_password TEXT,
-    last_digest_sent_at TEXT
+    last_digest_sent_at TEXT,
+    receive_crash_reports INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS app_settings (
     id INTEGER PRIMARY KEY CHECK(id = 1),
     theme_mode TEXT NOT NULL DEFAULT 'light' CHECK(theme_mode IN ('light', 'dark')),
     annual_vacation_days REAL NOT NULL DEFAULT 22 CHECK(annual_vacation_days >= 0),
-    data_retention_years INTEGER NOT NULL DEFAULT 4 CHECK(data_retention_years >= 0)
+    data_retention_years INTEGER NOT NULL DEFAULT 4 CHECK(data_retention_years >= 0),
+    company_name TEXT NOT NULL DEFAULT '',
+    company_iban TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS employee_documents (
@@ -379,10 +384,384 @@ CREATE INDEX IF NOT EXISTS idx_assigned_equipment_employee
     ON assigned_equipment(employee_id, assigned_date);
 """
 
+# Traducción directa de SCHEMA_TABLES/SCHEMA_INDEXES a PostgreSQL -- misma
+# estructura, mismas restricciones, sin ninguna migración incremental
+# propia todavía (no hace falta: no existe ninguna instalación PostgreSQL
+# real de esta app aún, así que una instalación nueva recibe directamente
+# el esquema actual completo, igual que SQLite lo recibiría si nunca
+# hubiera tenido una versión anterior). Reglas de traducción aplicadas de
+# forma uniforme, documentadas una vez aquí en vez de repetidas por tabla:
+#   INTEGER PRIMARY KEY AUTOINCREMENT -> INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+#   REAL -> DOUBLE PRECISION (el REAL de SQLite es doble precisión de 8 bytes
+#       siempre; el REAL de Postgres es de 4 bytes -- DOUBLE PRECISION es la
+#       equivalencia real, no un nombre parecido)
+#   BLOB -> BYTEA
+#   TEXT ... COLLATE NOCASE -> CITEXT (necesita `CREATE EXTENSION citext`,
+#       mismo comportamiento de unicidad/comparación insensible a mayúsculas)
+#   CHECK(x GLOB 'patrón') -> CHECK(x ~ '^patrón$') (las clases de caracteres
+#       de GLOB, ej. [0-2][0-9], ya son sintaxis de expresión regular POSIX
+#       válida sin cambios -- solo cambia el operador y se ancla con ^/$)
+#   Todo lo demás (CHECK, REFERENCES ... ON DELETE, UNIQUE, NOT NULL,
+#       DEFAULT, longitud/trim) es SQL estándar y se queda exactamente igual.
+POSTGRES_SCHEMA_TABLES = """
+CREATE EXTENSION IF NOT EXISTS citext;
+
+CREATE TABLE IF NOT EXISTS departments (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name CITEXT NOT NULL UNIQUE CHECK(length(trim(name)) > 0)
+);
+
+CREATE TABLE IF NOT EXISTS day_types (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name CITEXT NOT NULL UNIQUE CHECK(length(trim(name)) > 0),
+    color TEXT NOT NULL CHECK(color ~ '^#[0-9A-Fa-f]{6}$'),
+    is_vacation INTEGER NOT NULL DEFAULT 0 CHECK(is_vacation IN (0, 1))
+);
+
+CREATE TABLE IF NOT EXISTS shifts (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    department_id INTEGER NOT NULL REFERENCES departments(id) ON DELETE CASCADE,
+    name CITEXT NOT NULL CHECK(length(trim(name)) > 0),
+    start_time TEXT NOT NULL CHECK(start_time ~ '^[0-2][0-9]:[0-5][0-9]$'),
+    end_time TEXT NOT NULL CHECK(end_time ~ '^[0-2][0-9]:[0-5][0-9]$'),
+    start_time_2 TEXT CHECK(start_time_2 IS NULL OR start_time_2 ~ '^[0-2][0-9]:[0-5][0-9]$'),
+    end_time_2 TEXT CHECK(end_time_2 IS NULL OR end_time_2 ~ '^[0-2][0-9]:[0-5][0-9]$'),
+    days_of_week TEXT NOT NULL CHECK(length(trim(days_of_week)) > 0),
+    UNIQUE(department_id, name),
+    CHECK ((start_time_2 IS NULL) = (end_time_2 IS NULL))
+);
+
+CREATE TABLE IF NOT EXISTS collective_agreements (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name CITEXT NOT NULL UNIQUE CHECK(length(trim(name)) > 0)
+);
+
+CREATE TABLE IF NOT EXISTS professional_categories (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    collective_agreement_id INTEGER NOT NULL REFERENCES collective_agreements(id) ON DELETE CASCADE,
+    name CITEXT NOT NULL CHECK(length(trim(name)) > 0),
+    minimum_salary DOUBLE PRECISION NOT NULL CHECK(minimum_salary >= 0),
+    UNIQUE(collective_agreement_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS employees (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    first_name TEXT NOT NULL CHECK(length(trim(first_name)) > 0),
+    last_name TEXT NOT NULL CHECK(length(trim(last_name)) > 0),
+    email CITEXT NOT NULL UNIQUE,
+    phone TEXT NOT NULL DEFAULT '',
+    position TEXT NOT NULL CHECK(length(trim(position)) > 0),
+    department_id INTEGER NOT NULL REFERENCES departments(id) ON DELETE RESTRICT,
+    shift_id INTEGER REFERENCES shifts(id) ON DELETE SET NULL,
+    salary DOUBLE PRECISION NOT NULL CHECK(salary >= 0),
+    hire_date TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0, 1)),
+    bank_account TEXT NOT NULL DEFAULT '',
+    photo BYTEA,
+    dependent_children INTEGER NOT NULL DEFAULT 0 CHECK(dependent_children >= 0),
+    dni_nie CITEXT,
+    ss_number TEXT,
+    contract_type TEXT NOT NULL DEFAULT 'Indefinido' CHECK(contract_type IN
+        ('Indefinido', 'Temporal', 'Formación en alternancia', 'Prácticas', 'Fijo-discontinuo')),
+    contract_end_date TEXT,
+    birth_date TEXT,
+    next_medical_checkup_date TEXT,
+    termination_date TEXT,
+    termination_reason TEXT CHECK(termination_reason IS NULL OR termination_reason IN
+        ('Baja voluntaria', 'Despido procedente', 'Despido improcedente',
+         'Fin de contrato temporal', 'Jubilación', 'Fallecimiento', 'Otro')),
+    anonymized INTEGER NOT NULL DEFAULT 0 CHECK(anonymized IN (0, 1)),
+    prl_training_date TEXT,
+    manager_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+    head_of_department_id INTEGER REFERENCES departments(id) ON DELETE SET NULL,
+    professional_category_id INTEGER REFERENCES professional_categories(id) ON DELETE SET NULL,
+    self_service_pin_hash TEXT,
+    self_service_pin_salt TEXT
+);
+
+CREATE TABLE IF NOT EXISTS payroll_settings (
+    id INTEGER PRIMARY KEY CHECK(id = 1),
+    ss_employee_pct DOUBLE PRECISION NOT NULL CHECK(ss_employee_pct >= 0),
+    ss_employer_pct DOUBLE PRECISION NOT NULL CHECK(ss_employer_pct >= 0)
+);
+
+CREATE TABLE IF NOT EXISTS department_closures (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    department_id INTEGER NOT NULL REFERENCES departments(id) ON DELETE CASCADE,
+    closure_date TEXT NOT NULL,
+    day_type_id INTEGER NOT NULL REFERENCES day_types(id) ON DELETE RESTRICT,
+    note TEXT NOT NULL DEFAULT '',
+    UNIQUE(department_id, closure_date)
+);
+
+CREATE TABLE IF NOT EXISTS holiday_templates (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name CITEXT NOT NULL UNIQUE CHECK(length(trim(name)) > 0),
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS holiday_template_dates (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    template_id INTEGER NOT NULL REFERENCES holiday_templates(id) ON DELETE CASCADE,
+    holiday_date TEXT NOT NULL,
+    label TEXT NOT NULL,
+    UNIQUE(template_id, holiday_date)
+);
+
+CREATE TABLE IF NOT EXISTS document_templates (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name CITEXT NOT NULL UNIQUE CHECK(length(trim(name)) > 0),
+    body TEXT NOT NULL CHECK(length(trim(body)) > 0),
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS onboarding_tasks (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name CITEXT NOT NULL UNIQUE CHECK(length(trim(name)) > 0)
+);
+
+CREATE TABLE IF NOT EXISTS onboarding_checklist_items (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    task_id INTEGER NOT NULL REFERENCES onboarding_tasks(id) ON DELETE RESTRICT,
+    completed_at TEXT NOT NULL,
+    UNIQUE(employee_id, task_id)
+);
+
+CREATE TABLE IF NOT EXISTS candidates (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    first_name TEXT NOT NULL CHECK(length(trim(first_name)) > 0),
+    last_name TEXT NOT NULL CHECK(length(trim(last_name)) > 0),
+    email TEXT NOT NULL,
+    phone TEXT NOT NULL DEFAULT '',
+    position TEXT NOT NULL CHECK(length(trim(position)) > 0),
+    department_id INTEGER NOT NULL REFERENCES departments(id) ON DELETE RESTRICT,
+    phase TEXT NOT NULL CHECK(phase IN
+        ('Recibido', 'Entrevista', 'Oferta', 'Contratado', 'Descartado')),
+    notes TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS employee_absences (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    absence_date TEXT NOT NULL,
+    day_type_id INTEGER NOT NULL REFERENCES day_types(id) ON DELETE RESTRICT,
+    note TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'aprobada' CHECK(status IN ('pendiente', 'aprobada', 'rechazada')),
+    previous_day_type_id INTEGER REFERENCES day_types(id) ON DELETE SET NULL,
+    previous_note TEXT,
+    UNIQUE(employee_id, absence_date)
+);
+
+CREATE TABLE IF NOT EXISTS daily_shift_assignments (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    assignment_date TEXT NOT NULL,
+    shift_id INTEGER NOT NULL REFERENCES shifts(id) ON DELETE RESTRICT,
+    UNIQUE(employee_id, assignment_date)
+);
+
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    username CITEXT NOT NULL UNIQUE CHECK(length(trim(username)) > 0),
+    password_hash TEXT NOT NULL,
+    salt TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'admin' CHECK(role IN ('admin', 'encargado')),
+    department_id INTEGER REFERENCES departments(id) ON DELETE SET NULL,
+    email_provider TEXT CHECK(email_provider IS NULL OR email_provider IN ('gmail', 'outlook')),
+    email_address TEXT,
+    email_app_password TEXT,
+    last_digest_sent_at TEXT,
+    receive_crash_reports INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS app_settings (
+    id INTEGER PRIMARY KEY CHECK(id = 1),
+    theme_mode TEXT NOT NULL DEFAULT 'light' CHECK(theme_mode IN ('light', 'dark')),
+    annual_vacation_days DOUBLE PRECISION NOT NULL DEFAULT 22 CHECK(annual_vacation_days >= 0),
+    data_retention_years INTEGER NOT NULL DEFAULT 4 CHECK(data_retention_years >= 0),
+    company_name TEXT NOT NULL DEFAULT '',
+    company_iban TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS employee_documents (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    filename TEXT NOT NULL CHECK(length(trim(filename)) > 0),
+    category TEXT NOT NULL CHECK(category IN ('Contrato', 'DNI/NIE', 'Certificado', 'Otro')),
+    content BYTEA NOT NULL,
+    size_bytes INTEGER NOT NULL CHECK(size_bytes > 0),
+    uploaded_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS payroll_records (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    year INTEGER NOT NULL,
+    month INTEGER NOT NULL CHECK(month BETWEEN 1 AND 12),
+    generated_at TEXT NOT NULL,
+    annual_gross_salary_snapshot DOUBLE PRECISION NOT NULL,
+    dependent_children_snapshot INTEGER NOT NULL,
+    paga_ordinaria DOUBLE PRECISION NOT NULL,
+    paga_extra DOUBLE PRECISION NOT NULL,
+    supplements_total DOUBLE PRECISION NOT NULL DEFAULT 0,
+    bruto_mes DOUBLE PRECISION NOT NULL,
+    irpf_pct DOUBLE PRECISION NOT NULL,
+    irpf_importe DOUBLE PRECISION NOT NULL,
+    ss_employee_pct DOUBLE PRECISION NOT NULL,
+    ss_employee_importe DOUBLE PRECISION NOT NULL,
+    advances_total DOUBLE PRECISION NOT NULL DEFAULT 0,
+    neto DOUBLE PRECISION NOT NULL,
+    ss_employer_pct DOUBLE PRECISION NOT NULL,
+    ss_employer_importe DOUBLE PRECISION NOT NULL,
+    coste_total_empresa DOUBLE PRECISION NOT NULL,
+    UNIQUE(employee_id, year, month)
+);
+
+CREATE TABLE IF NOT EXISTS time_entries (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    entry_type TEXT NOT NULL CHECK(entry_type IN ('entrada', 'salida')),
+    entry_timestamp TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS employee_history (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    position TEXT NOT NULL CHECK(length(trim(position)) > 0),
+    salary DOUBLE PRECISION NOT NULL CHECK(salary >= 0),
+    effective_date TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS payroll_supplements (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    year INTEGER NOT NULL,
+    month INTEGER NOT NULL CHECK(month BETWEEN 1 AND 12),
+    supplement_type TEXT NOT NULL CHECK(supplement_type IN ('plus', 'horas_extra', 'anticipo')),
+    description TEXT NOT NULL CHECK(length(trim(description)) > 0),
+    amount DOUBLE PRECISION NOT NULL CHECK(amount > 0),
+    hours DOUBLE PRECISION CHECK(hours IS NULL OR hours > 0),
+    rate_per_hour DOUBLE PRECISION CHECK(rate_per_hour IS NULL OR rate_per_hour > 0),
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS severance_settlements (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    termination_date TEXT NOT NULL,
+    termination_reason TEXT NOT NULL,
+    hire_date TEXT NOT NULL,
+    annual_gross_salary DOUBLE PRECISION NOT NULL CHECK(annual_gross_salary >= 0),
+    annual_vacation_days DOUBLE PRECISION NOT NULL CHECK(annual_vacation_days >= 0),
+    vacation_days_used_this_year INTEGER NOT NULL CHECK(vacation_days_used_this_year >= 0),
+    vacation_days_pending DOUBLE PRECISION NOT NULL CHECK(vacation_days_pending >= 0),
+    vacation_amount DOUBLE PRECISION NOT NULL CHECK(vacation_amount >= 0),
+    extra_payment_months_accrued INTEGER NOT NULL CHECK(extra_payment_months_accrued >= 0),
+    extra_payment_amount DOUBLE PRECISION NOT NULL CHECK(extra_payment_amount >= 0),
+    total_amount DOUBLE PRECISION NOT NULL CHECK(total_amount >= 0),
+    generated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS work_accidents (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    accident_date TEXT NOT NULL,
+    severity TEXT NOT NULL CHECK(severity IN ('Leve', 'Grave', 'Muy grave', 'Mortal')),
+    description TEXT NOT NULL CHECK(length(trim(description)) > 0),
+    caused_leave INTEGER NOT NULL DEFAULT 0 CHECK(caused_leave IN (0, 1)),
+    reported_to_authority INTEGER NOT NULL DEFAULT 0 CHECK(reported_to_authority IN (0, 1)),
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS it_episodes (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    contingency TEXT NOT NULL CHECK(contingency IN
+        ('Común', 'Accidente de trabajo', 'Accidente no laboral')),
+    leave_date TEXT NOT NULL,
+    last_confirmation_date TEXT,
+    return_date TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS employee_trainings (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    name TEXT NOT NULL CHECK(length(trim(name)) > 0),
+    completion_date TEXT NOT NULL,
+    expiration_date TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS employee_objectives (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    title TEXT NOT NULL CHECK(length(trim(title)) > 0),
+    target_date TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pendiente' CHECK(status IN ('pendiente', 'cumplido', 'no_cumplido')),
+    notes TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS performance_reviews (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    review_date TEXT NOT NULL,
+    comments TEXT NOT NULL CHECK(length(trim(comments)) > 0),
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS assigned_equipment (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    description TEXT NOT NULL CHECK(length(trim(description)) > 0),
+    assigned_date TEXT NOT NULL,
+    returned_date TEXT,
+    notes TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    CHECK (returned_date IS NULL OR returned_date >= assigned_date)
+);
+
+CREATE TABLE IF NOT EXISTS audit_log (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    occurred_at TEXT NOT NULL,
+    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    username TEXT NOT NULL,
+    action TEXT NOT NULL CHECK(length(trim(action)) > 0),
+    details TEXT NOT NULL DEFAULT ''
+);
+"""
+
+# Mismos índices que SCHEMA_INDEXES -- CREATE INDEX es sintaxis idéntica en
+# ambos motores, así que esto es una copia literal, no una traducción.
+POSTGRES_SCHEMA_INDEXES = SCHEMA_INDEXES
+
 DEFAULT_DB_PATH = app_dir() / "empleados.db"
 
 
-def get_connection(db_path: Path | str = DEFAULT_DB_PATH) -> sqlite3.Connection:
+def get_connection(db_path: Path | str = DEFAULT_DB_PATH) -> DbConnection:
+    # GESTION_EMPLEADOS_DB_URL activa PostgreSQL en vez de SQLite -- pensado
+    # para el modelo de "cada empresa, su propia instalación" (ver README):
+    # sin esta variable (el caso por defecto y, en la práctica, casi
+    # siempre), el comportamiento es exactamente el de siempre, ni una
+    # línea nueva se ejecuta de este bloque. `db_path` se ignora en el
+    # camino PostgreSQL a propósito: no tiene sentido para una URL de red.
+    db_url = os.environ.get(DB_URL_ENV_VAR, "")
+    if db_url:
+        if not is_postgres_url(db_url):
+            raise ValueError(
+                f"{DB_URL_ENV_VAR} solo admite URLs postgresql://; para usar "
+                "SQLite (el valor por defecto) no definas esta variable."
+            )
+        from app.db_engine import create_postgres_connection
+
+        return create_postgres_connection(db_url)
+
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
@@ -405,7 +784,36 @@ DEFAULT_SS_EMPLOYEE_PCT = 6.35
 DEFAULT_SS_EMPLOYER_PCT = 31.40
 
 
-def init_db(conn: sqlite3.Connection) -> None:
+def init_db(conn: DbConnection) -> None:
+    if isinstance(conn, PostgresConnection):
+        # PostgreSQL no tiene todavía ninguna migración incremental propia
+        # -- no hace falta: no existe ninguna instalación PostgreSQL real
+        # de esta app aún, así que una base de datos nueva recibe
+        # directamente el esquema actual completo (ver el comentario junto
+        # a POSTGRES_SCHEMA_TABLES). "ON CONFLICT DO NOTHING" es el
+        # equivalente exacto de "INSERT OR IGNORE" de SQLite.
+        conn.executescript(POSTGRES_SCHEMA_TABLES)
+        conn.executescript(POSTGRES_SCHEMA_INDEXES)
+        conn.execute(
+            "INSERT INTO payroll_settings (id, ss_employee_pct, ss_employer_pct) "
+            "VALUES (1, ?, ?) ON CONFLICT (id) DO NOTHING",
+            (DEFAULT_SS_EMPLOYEE_PCT, DEFAULT_SS_EMPLOYER_PCT),
+        )
+        conn.execute(
+            "INSERT INTO app_settings (id, theme_mode) VALUES (1, 'light') "
+            "ON CONFLICT (id) DO NOTHING"
+        )
+        conn.commit()
+        return
+
+    # A partir de aquí, todo es SQLite -- las ~24 migraciones siguientes
+    # son incrementales sobre una base de datos SQLite ya existente, no
+    # tienen sentido para PostgreSQL (que siempre parte del esquema
+    # completo actual, ver arriba). El assert además deja que mypy
+    # reduzca el tipo de `conn` a sqlite3.Connection para el resto de la
+    # función, que es lo que esas ~24 funciones esperan.
+    assert isinstance(conn, sqlite3.Connection)
+
     # Defensive: FK enforcement (RESTRICT/CASCADE/SET NULL) is a no-op in SQLite
     # unless this pragma is set on the connection. get_connection() already sets
     # it, but init_db() is public and shouldn't silently lose FK enforcement if
@@ -419,9 +827,11 @@ def init_db(conn: sqlite3.Connection) -> None:
     _migrate_employees_dni_ss(conn)
     _migrate_day_types_is_vacation(conn)
     _migrate_app_settings_vacation_days(conn)
+    _migrate_app_settings_company_identity(conn)
     _migrate_employee_absences_status(conn)
     _migrate_users_role_and_department(conn)
     _migrate_users_email_digest(conn)
+    _migrate_users_crash_reports(conn)
     _migrate_backfill_employee_history(conn)
     _migrate_employees_alerts_fields(conn)
     _migrate_payroll_records_supplements(conn)
@@ -547,6 +957,18 @@ def _migrate_app_settings_vacation_days(conn: sqlite3.Connection) -> None:
         )
 
 
+def _migrate_app_settings_company_identity(conn: sqlite3.Connection) -> None:
+    """Nombre e IBAN de la propia empresa -- hacen falta como deudor
+    (Dbtr/DbtrAcct) en el fichero SEPA de pago de nóminas (ver
+    app/sepa_export.py); no existía ningún dato de "quién es la empresa"
+    en la aplicación hasta ahora."""
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(app_settings)").fetchall()}
+    if "company_name" not in columns:
+        conn.execute("ALTER TABLE app_settings ADD COLUMN company_name TEXT NOT NULL DEFAULT ''")
+    if "company_iban" not in columns:
+        conn.execute("ALTER TABLE app_settings ADD COLUMN company_iban TEXT NOT NULL DEFAULT ''")
+
+
 def _migrate_employee_absences_status(conn: sqlite3.Connection) -> None:
     columns = {row[1] for row in conn.execute("PRAGMA table_info(employee_absences)").fetchall()}
     if "status" not in columns:
@@ -601,6 +1023,15 @@ def _migrate_users_email_digest(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE users ADD COLUMN email_app_password TEXT")
     if "last_digest_sent_at" not in columns:
         conn.execute("ALTER TABLE users ADD COLUMN last_digest_sent_at TEXT")
+
+
+def _migrate_users_crash_reports(conn: sqlite3.Connection) -> None:
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+    if "receive_crash_reports" not in columns:
+        conn.execute(
+            "ALTER TABLE users ADD COLUMN receive_crash_reports "
+            "INTEGER NOT NULL DEFAULT 0"
+        )
 
 
 def _migrate_employees_alerts_fields(conn: sqlite3.Connection) -> None:
@@ -750,7 +1181,7 @@ def _migrate_backfill_employee_history(conn: sqlite3.Connection) -> None:
 
 
 @contextmanager
-def transaction(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
+def transaction(conn: DbConnection) -> Iterator[DbConnection]:
     try:
         yield conn
         conn.commit()

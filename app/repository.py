@@ -11,6 +11,7 @@ from datetime import date, datetime, timedelta
 
 from app import validation
 from app.database import DEFAULT_SS_EMPLOYEE_PCT, DEFAULT_SS_EMPLOYER_PCT, transaction
+from app.db_engine import DbConnection
 from app.document_templates import build_placeholder_values, render_document_template
 from app.models import (
     AssignedEquipment,
@@ -263,7 +264,7 @@ def _row_to_employee_history(row: sqlite3.Row) -> EmployeeHistoryEntry:
 
 
 def _record_employee_history(
-    conn: sqlite3.Connection,
+    conn: DbConnection,
     employee_id: int,
     position: str,
     salary: float,
@@ -363,7 +364,7 @@ def _month_bounds(year: int, month: int) -> tuple[date, date]:
 
 
 class DepartmentRepository:
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: DbConnection) -> None:
         self._conn = conn
 
     def create(self, name: str) -> Department:
@@ -458,7 +459,7 @@ class DepartmentRepository:
 
 
 class CollectiveAgreementRepository:
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: DbConnection) -> None:
         self._conn = conn
 
     def create(self, name: str) -> CollectiveAgreement:
@@ -517,7 +518,7 @@ class CollectiveAgreementRepository:
 
 
 class ProfessionalCategoryRepository:
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: DbConnection) -> None:
         self._conn = conn
 
     def _validate(self, data: ProfessionalCategoryInput) -> _ValidatedProfessionalCategory:
@@ -596,7 +597,7 @@ class ProfessionalCategoryRepository:
 
 
 class EmployeeRepository:
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: DbConnection) -> None:
         self._conn = conn
 
     def _validate(
@@ -1056,7 +1057,7 @@ class EmployeeHistoryRepository:
     el historial es un efecto secundario de editar al empleado, no una
     acción independiente que alguien deba recordar hacer aparte."""
 
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: DbConnection) -> None:
         self._conn = conn
 
     def list_for_employee(self, employee_id: int) -> list[EmployeeHistoryEntry]:
@@ -1096,7 +1097,7 @@ class SeveranceSettlementRepository:
     hay un "regenerar" que tenga sentido aquí -- una corrección se guarda
     como una entrada nueva, dejando constancia de ambas)."""
 
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: DbConnection) -> None:
         self._conn = conn
 
     def create(
@@ -1183,7 +1184,7 @@ class WorkAccidentRepository:
     estrictamente de solo-inserción: un accidente es un hecho registrado
     por un humano que puede necesitar corregirse, no un cálculo derivado."""
 
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: DbConnection) -> None:
         self._conn = conn
 
     def create(
@@ -1268,7 +1269,7 @@ class EmployeeTrainingRepository:
     que puede necesitar corregirse, no un cálculo derivado ni un
     histórico de solo-inserción)."""
 
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: DbConnection) -> None:
         self._conn = conn
 
     def create(
@@ -1365,7 +1366,7 @@ class ObjectiveRepository:
     estado SÍ cambia con el tiempo según avanza el objetivo -- eso no es
     una corrección, es su ciclo de vida normal."""
 
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: DbConnection) -> None:
         self._conn = conn
 
     def create(
@@ -1450,7 +1451,7 @@ class PerformanceReviewRepository:
     introdujo por error, pero no una plantilla de campos que tenga sentido
     editar en el sitio."""
 
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: DbConnection) -> None:
         self._conn = conn
 
     def create(self, employee_id: int, review_date: date, comments: str) -> PerformanceReview:
@@ -1528,7 +1529,7 @@ class AssignedEquipmentRepository:
     Objective), pero pasar de "en manos del empleado" a "devuelto" sí es
     una transición de estado normal, no una corrección."""
 
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: DbConnection) -> None:
         self._conn = conn
 
     def create(
@@ -1626,7 +1627,7 @@ class ITEpisodeRepository:
     propio cuadrante visual; ver app/incapacidad_temporal.py para el
     cálculo de quién paga qué parte del salario según la contingencia)."""
 
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: DbConnection) -> None:
         self._conn = conn
 
     def create(self, employee_id: int, contingency: str, leave_date: date) -> ITEpisode:
@@ -1761,7 +1762,7 @@ class AuditLogRepository:
     en su constructor, así que esto evita añadir un parámetro `current_user`
     a decenas de constructores solo para poder auditar."""
 
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: DbConnection) -> None:
         self._conn = conn
         self._current_user: User | None = None
 
@@ -1836,7 +1837,7 @@ def _row_to_employee_document_summary(row: sqlite3.Row) -> EmployeeDocumentSumma
 
 
 class EmployeeDocumentRepository:
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: DbConnection) -> None:
         self._conn = conn
 
     def upload(
@@ -1923,7 +1924,7 @@ class DocumentTemplateRepository:
     mano -- evita duplicar el almacenamiento/descarga/eliminación ya
     existentes para documentos."""
 
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: DbConnection) -> None:
         self._conn = conn
 
     def create(self, name: str, body: str) -> DocumentTemplate:
@@ -2015,7 +2016,7 @@ class OnboardingTaskRepository:
     como hecho -- desmarcar una tarea borra la fila en vez de guardar un
     booleano a False."""
 
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: DbConnection) -> None:
         self._conn = conn
 
     def create(self, name: str) -> OnboardingTask:
@@ -2138,7 +2139,7 @@ class _ValidatedShift:
 
 
 class ShiftRepository:
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: DbConnection) -> None:
         self._conn = conn
 
     def _validate(self, data: ShiftInput) -> _ValidatedShift:
@@ -2245,7 +2246,7 @@ class ShiftRepository:
 
 
 class DayTypeRepository:
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: DbConnection) -> None:
         self._conn = conn
 
     def create(self, name: str, color: str, is_vacation: bool = False) -> DayType:
@@ -2304,7 +2305,7 @@ class DayTypeRepository:
 
 
 class DepartmentClosureRepository:
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: DbConnection) -> None:
         self._conn = conn
 
     def _ensure_department_and_day_type(self, department_id: int, day_type_id: int) -> None:
@@ -2416,7 +2417,7 @@ class HolidayTemplateRepository:
     para ese departamento (por el motivo que fuera) se deja como estaba en
     vez de sobrescribirla -- ver apply_to_departments()."""
 
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: DbConnection) -> None:
         self._conn = conn
 
     def create(self, name: str) -> HolidayTemplate:
@@ -2536,7 +2537,7 @@ class HolidayTemplateRepository:
 
 
 class EmployeeAbsenceRepository:
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: DbConnection) -> None:
         self._conn = conn
 
     def _ensure_employee_and_day_type(self, employee_id: int, day_type_id: int) -> None:
@@ -2916,7 +2917,7 @@ class CandidateRepository:
     Employee.email, el email de un candidato NO es único: la misma persona
     puede volver a presentarse a otra vacante, o a la misma más adelante."""
 
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: DbConnection) -> None:
         self._conn = conn
 
     def _validate(self, data: CandidateInput) -> _ValidatedCandidate:
@@ -3031,7 +3032,7 @@ def working_weekdays_for_shift(shift: Shift | None) -> frozenset[int]:
 
 
 class DailyAssignmentRepository:
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: DbConnection) -> None:
         self._conn = conn
 
     def _ensure_employee_and_shift(self, employee_id: int, shift_id: int) -> None:
@@ -3197,7 +3198,7 @@ class DailyAssignmentRepository:
 
 
 class PayrollSettingsRepository:
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: DbConnection) -> None:
         self._conn = conn
 
     def get(self) -> PayrollSettings:
@@ -3258,7 +3259,7 @@ def _row_to_payroll_record(row: sqlite3.Row) -> PayrollRecord:
 
 
 class PayrollRecordRepository:
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: DbConnection) -> None:
         self._conn = conn
 
     def generate(self, employee_id: int, year: int, month: int) -> PayrollRecord:
@@ -3376,6 +3377,31 @@ class PayrollRecordRepository:
         if cursor.rowcount == 0:
             raise NotFoundError("no existe una nómina generada para ese empleado/año/mes")
 
+    def list_for_month(
+        self, year: int, month: int, department_id: int | None = None
+    ) -> list[PayrollRecord]:
+        """Todas las nóminas YA GENERADAS de un año/mes concreto, sin
+        importar el empleado -- pensado para una vista agregada de todo el
+        mes (ej. la exportación SEPA de pago de nóminas), a diferencia de
+        list_for_employee() que mira a un único empleado a lo largo del
+        tiempo. Mismo criterio que monthly_totals()/department_totals():
+        solo nóminas generadas, nunca una estimación en vivo."""
+        params: list[object] = [year, month]
+        department_filter = ""
+        if department_id is not None:
+            department_filter = "AND e.department_id = ?"
+            params.append(department_id)
+        rows = self._conn.execute(
+            f"""
+            SELECT pr.* FROM payroll_records pr
+            JOIN employees e ON e.id = pr.employee_id
+            WHERE pr.year = ? AND pr.month = ? {department_filter}
+            ORDER BY e.first_name, e.last_name
+            """,
+            params,
+        ).fetchall()
+        return [_row_to_payroll_record(row) for row in rows]
+
     def monthly_totals(
         self, year: int, department_id: int | None = None
     ) -> list[MonthlyCostSummary]:
@@ -3477,7 +3503,7 @@ def _row_to_payroll_supplement(row: sqlite3.Row) -> PayrollSupplement:
 
 
 class PayrollSupplementRepository:
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: DbConnection) -> None:
         self._conn = conn
 
     def create(
@@ -3617,6 +3643,7 @@ def _row_to_user(row: sqlite3.Row) -> User:
             if row["last_digest_sent_at"] is not None
             else None
         ),
+        receive_crash_reports=bool(row["receive_crash_reports"]),
     )
 
 
@@ -3631,7 +3658,7 @@ def _row_to_time_entry(row: sqlite3.Row) -> TimeClockEntry:
 
 
 class UserRepository:
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: DbConnection) -> None:
         self._conn = conn
 
     def create(
@@ -3683,6 +3710,7 @@ class UserRepository:
             email_provider=None,
             email_address=None,
             last_digest_sent_at=None,
+            receive_crash_reports=False,
         )
 
     def list_all(self) -> list[User]:
@@ -3792,14 +3820,57 @@ class UserRepository:
         )
 
     def clear_email_connection(self, user_id: int) -> None:
+        # receive_crash_reports también se resetea aquí: dejarlo en 1 sin
+        # correo conectado sería un estado a medias (el aviso de fallo no
+        # tiene a dónde enviarse) que además confundiría a quien vuelva a
+        # "Mi cuenta..." más tarde y encuentre la casilla marcada sin saber
+        # por qué ya no le llega nada.
         with transaction(self._conn):
             cursor = self._conn.execute(
                 "UPDATE users SET email_provider = NULL, email_address = NULL, "
-                "email_app_password = NULL WHERE id = ?",
+                "email_app_password = NULL, receive_crash_reports = 0 WHERE id = ?",
                 (user_id,),
             )
         if cursor.rowcount == 0:
             raise NotFoundError(f"no existe el usuario con id {user_id}")
+
+    def set_receive_crash_reports(self, user_id: int, enabled: bool) -> None:
+        """Suscripción independiente del resumen semanal: activarla exige
+        tener ya un correo conectado (reutiliza esa misma conexión para
+        enviar el aviso), pero tener el resumen activado no activa esto
+        automáticamente ni viceversa."""
+        if enabled:
+            row = self._conn.execute(
+                "SELECT email_provider FROM users WHERE id = ?", (user_id,)
+            ).fetchone()
+            if row is None:
+                raise NotFoundError(f"no existe el usuario con id {user_id}")
+            if row["email_provider"] is None:
+                raise RepositoryError(
+                    'conecta un correo en "Mi cuenta..." antes de activar '
+                    "los avisos de fallo"
+                )
+        with transaction(self._conn):
+            cursor = self._conn.execute(
+                "UPDATE users SET receive_crash_reports = ? WHERE id = ?",
+                (1 if enabled else 0, user_id),
+            )
+        if cursor.rowcount == 0:
+            raise NotFoundError(f"no existe el usuario con id {user_id}")
+
+    def list_crash_report_recipients(self) -> list[EmailConnection]:
+        rows = self._conn.execute(
+            "SELECT email_provider, email_address, email_app_password FROM users "
+            "WHERE receive_crash_reports = 1 AND email_provider IS NOT NULL"
+        ).fetchall()
+        return [
+            EmailConnection(
+                provider=row["email_provider"],
+                address=row["email_address"],
+                app_password=row["email_app_password"],
+            )
+            for row in rows
+        ]
 
     def mark_digest_sent(self, user_id: int, sent_at: datetime) -> None:
         with transaction(self._conn):
@@ -3830,7 +3901,7 @@ class UserRepository:
 
 
 class TimeEntryRepository:
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: DbConnection) -> None:
         self._conn = conn
 
     def _ensure_employee(self, employee_id: int) -> None:
@@ -4008,7 +4079,7 @@ class TimeEntryRepository:
 
 
 class AppSettingsRepository:
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: DbConnection) -> None:
         self._conn = conn
 
     def get_theme_mode(self) -> str:
@@ -4060,6 +4131,32 @@ class AppSettingsRepository:
                 "UPDATE app_settings SET data_retention_years = ? WHERE id = 1", (clean_value,)
             )
 
+    def get_company_name(self) -> str:
+        row = self._conn.execute("SELECT company_name FROM app_settings WHERE id = 1").fetchone()
+        if row is None:
+            return ""
+        return str(row["company_name"])
+
+    def set_company_name(self, value: str) -> None:
+        clean_value = validation.validate_company_name(value)
+        with transaction(self._conn):
+            self._conn.execute(
+                "UPDATE app_settings SET company_name = ? WHERE id = 1", (clean_value,)
+            )
+
+    def get_company_iban(self) -> str:
+        row = self._conn.execute("SELECT company_iban FROM app_settings WHERE id = 1").fetchone()
+        if row is None:
+            return ""
+        return str(row["company_iban"])
+
+    def set_company_iban(self, value: str) -> None:
+        clean_value = validation.validate_iban(value)
+        with transaction(self._conn):
+            self._conn.execute(
+                "UPDATE app_settings SET company_iban = ? WHERE id = 1", (clean_value,)
+            )
+
 
 @dataclass(frozen=True, slots=True)
 class Repositories:
@@ -4094,7 +4191,7 @@ class Repositories:
     assigned_equipment: AssignedEquipmentRepository
 
     @staticmethod
-    def create(conn: sqlite3.Connection) -> Repositories:
+    def create(conn: DbConnection) -> Repositories:
         return Repositories(
             departments=DepartmentRepository(conn),
             employees=EmployeeRepository(conn),

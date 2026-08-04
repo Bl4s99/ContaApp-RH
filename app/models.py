@@ -197,6 +197,7 @@ class User:
     email_provider: str | None
     email_address: str | None
     last_digest_sent_at: datetime | None
+    receive_crash_reports: bool
 
 
 @dataclass(frozen=True, slots=True)

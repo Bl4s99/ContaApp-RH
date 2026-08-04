@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import tkinter as tk
 from collections.abc import Callable
-from datetime import date
-from tkinter import messagebox, ttk
+from datetime import date, datetime, timedelta
+from pathlib import Path
+from tkinter import filedialog, messagebox, ttk
 
 from app import theme, validation
-from app.calendar_widget import MONTH_NAMES, shift_month
+from app.calendar_widget import MONTH_NAMES, DateEntry, shift_month
+from app.gestoria_export import build_gestoria_rows, write_gestoria_csv
 from app.models import Department, Employee
 from app.payroll import MonthlyPayroll, calculate_monthly_payroll
 from app.repository import Repositories, RepositoryError
+from app.sepa_export import SepaPayment, build_sepa_payments, build_sepa_xml
 from app.window_utils import center_window
 
 def _format_currency(value: float) -> str:
@@ -99,6 +102,204 @@ class PayrollSettingsDialog(tk.Toplevel):
             return
         self._on_change()
         self.destroy()
+
+
+class SepaExportDialog(tk.Toplevel):
+    """Genera un fichero SEPA (pain.001, ver app/sepa_export.py) para pagar
+    por lote las nóminas YA GENERADAS del mes que se esté viendo en
+    Nóminas -- mismo criterio que Coste de personal: nunca una estimación
+    en vivo. Solo administradores (como "Configurar % Seguridad
+    Social..."): pagar nóminas es una acción de toda la empresa, no de un
+    departamento suelto, así que no respeta el alcance por departamento de
+    un encargado."""
+
+    def __init__(self, parent: tk.Misc, repos: Repositories, year: int, month: int) -> None:
+        super().__init__(parent)
+        self.title(f"Exportar SEPA — {MONTH_NAMES[month - 1]} {year}")
+        self.resizable(False, False)
+        self.transient(parent.winfo_toplevel())
+        self.grab_set()
+
+        self._repos = repos
+        self._year = year
+        self._month = month
+        self._payments: list[SepaPayment] = []
+
+        frame = ttk.Frame(self, padding=12)
+        frame.grid(row=0, column=0, sticky="nsew")
+
+        ttk.Label(
+            frame, text="Datos de la empresa (como pagadora)", style="PageHeading.TLabel"
+        ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
+        ttk.Label(frame, text="Nombre").grid(row=1, column=0, sticky="w", pady=3)
+        self.company_name_var = tk.StringVar(value=repos.app_settings.get_company_name())
+        ttk.Entry(frame, textvariable=self.company_name_var, width=36).grid(
+            row=1, column=1, sticky="w", pady=3
+        )
+        ttk.Label(frame, text="IBAN").grid(row=2, column=0, sticky="w", pady=3)
+        self.company_iban_var = tk.StringVar(value=repos.app_settings.get_company_iban())
+        ttk.Entry(frame, textvariable=self.company_iban_var, width=36).grid(
+            row=2, column=1, sticky="w", pady=3
+        )
+        ttk.Button(
+            frame, text="Guardar datos de la empresa", command=self._handle_save_company
+        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(2, 0))
+        self.company_error_label = ttk.Label(frame, text="", style="Error.TLabel", wraplength=420)
+        self.company_error_label.grid(row=4, column=0, columnspan=2, sticky="w", pady=(2, 0))
+
+        ttk.Separator(frame, orient="horizontal").grid(
+            row=5, column=0, columnspan=2, sticky="ew", pady=12
+        )
+
+        ttk.Label(frame, text="Fecha de ejecución solicitada").grid(
+            row=6, column=0, sticky="w", pady=3
+        )
+        self.execution_date = DateEntry(
+            frame, initial=date.today() + timedelta(days=1), min_date=date.today()
+        )
+        self.execution_date.grid(row=6, column=1, sticky="w", pady=3)
+
+        ttk.Label(
+            frame,
+            text=f"Nóminas generadas de {MONTH_NAMES[month - 1]} {year}",
+            style="PageHeading.TLabel",
+        ).grid(row=7, column=0, columnspan=2, sticky="w", pady=(12, 4))
+
+        tree_frame = ttk.Frame(frame)
+        tree_frame.grid(row=8, column=0, columnspan=2, sticky="nsew")
+        self.tree = ttk.Treeview(
+            tree_frame, columns=("empleado", "iban", "importe"), show="headings", height=8
+        )
+        self.tree.heading("empleado", text="Empleado")
+        self.tree.column("empleado", width=170, anchor="w")
+        self.tree.heading("iban", text="IBAN")
+        self.tree.column("iban", width=210, anchor="w")
+        self.tree.heading("importe", text="Importe neto")
+        self.tree.column("importe", width=100, anchor="e")
+        vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=vsb.set)
+        self.tree.pack(side="left", fill="both", expand=True)
+        vsb.pack(side="right", fill="y")
+
+        self.summary_label = ttk.Label(
+            frame, text="", style="Muted.TLabel", wraplength=480, justify="left"
+        )
+        self.summary_label.grid(row=9, column=0, columnspan=2, sticky="w", pady=(6, 0))
+
+        button_row = ttk.Frame(frame)
+        button_row.grid(row=10, column=0, columnspan=2, pady=(12, 0))
+        self.export_button = ttk.Button(
+            button_row,
+            text="Generar fichero SEPA...",
+            command=self._handle_export,
+            style="Accent.TButton",
+        )
+        self.export_button.pack(side="left", padx=(0, 6))
+        ttk.Button(button_row, text="Cerrar", command=self.destroy).pack(side="left")
+        self.export_error_label = ttk.Label(frame, text="", style="Error.TLabel", wraplength=480)
+        self.export_error_label.grid(row=11, column=0, columnspan=2, sticky="w", pady=(4, 0))
+
+        self.bind("<Escape>", lambda _e: self.destroy())
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+        center_window(self, parent)
+
+        self._load_preview()
+
+    def _load_preview(self) -> None:
+        records = self._repos.payroll_records.list_for_month(self._year, self._month)
+        payroll_rows: list[tuple[int, str, str, float]] = []
+        for record in records:
+            employee = self._repos.employees.get(record.employee_id)
+            payroll_rows.append(
+                (
+                    record.employee_id,
+                    employee.full_name,
+                    employee.bank_account,
+                    record.payroll.neto,
+                )
+            )
+        result = build_sepa_payments(payroll_rows)
+        self._payments = result.payments
+
+        self.tree.delete(*self.tree.get_children())
+        for payment in result.payments:
+            self.tree.insert(
+                "",
+                "end",
+                iid=str(payment.employee_id),
+                values=(payment.employee_name, payment.iban, _format_currency(payment.amount)),
+            )
+
+        if not records:
+            self.summary_label.configure(
+                text=(
+                    "No hay ninguna nómina generada para este mes — "
+                    "genera las nóminas primero en esta misma página."
+                )
+            )
+        else:
+            total = sum(p.amount for p in result.payments)
+            lines = [f"{len(result.payments)} pago(s), {_format_currency(total)} en total."]
+            if result.skipped:
+                lines.append(f"{len(result.skipped)} omitido(s):")
+                lines.extend(f"  • {reason}" for reason in result.skipped)
+            self.summary_label.configure(text="\n".join(lines))
+        self.export_button.state(["!disabled"] if self._payments else ["disabled"])
+
+    def _handle_save_company(self) -> None:
+        try:
+            self._repos.app_settings.set_company_name(self.company_name_var.get())
+            self._repos.app_settings.set_company_iban(self.company_iban_var.get())
+        except validation.ValidationError as exc:
+            self.company_error_label.configure(text=str(exc))
+            return
+        self.company_error_label.configure(text="")
+        self.company_name_var.set(self._repos.app_settings.get_company_name())
+        self.company_iban_var.set(self._repos.app_settings.get_company_iban())
+
+    def _handle_export(self) -> None:
+        if not self._payments:
+            return
+        try:
+            execution_date = date.fromisoformat(self.execution_date.get())
+        except ValueError:
+            self.export_error_label.configure(text="Fecha de ejecución inválida.")
+            return
+        message_id = f"NOM{datetime.now():%Y%m%d%H%M%S}"
+        try:
+            xml_content = build_sepa_xml(
+                self._payments,
+                company_name=self.company_name_var.get(),
+                company_iban=self.company_iban_var.get(),
+                requested_execution_date=execution_date,
+                message_id=message_id,
+                created_at=datetime.now(),
+            )
+        except ValueError as exc:
+            self.export_error_label.configure(text=str(exc))
+            return
+        path_str = filedialog.asksaveasfilename(
+            title="Guardar fichero SEPA",
+            defaultextension=".xml",
+            filetypes=[("XML", "*.xml")],
+            initialfile=f"sepa_nominas_{self._year}{self._month:02d}.xml",
+            parent=self,
+        )
+        if not path_str:
+            return
+        try:
+            Path(path_str).write_text(xml_content, encoding="utf-8")
+        except OSError as exc:
+            self.export_error_label.configure(text=str(exc))
+            return
+        self.export_error_label.configure(text="")
+        messagebox.showinfo(
+            "SEPA",
+            f"Fichero generado con {len(self._payments)} pago(s).\n"
+            "Súbelo a la banca online de la empresa para ejecutarlo -- "
+            "esta aplicación no envía dinero ni se conecta a ningún banco.",
+            parent=self,
+        )
 
 
 class PayrollSupplementDialog(tk.Toplevel):
@@ -322,6 +523,35 @@ class PayrollPage(ttk.Frame):
         self.month_label.pack(side="left", padx=4)
         ttk.Button(month_row, text=">", width=3, command=self._go_next_month).pack(side="left")
 
+        # Acciones de todo el mes (no de un empleado suelto) -- en fila
+        # horizontal justo bajo el selector de mes, siempre visibles sin
+        # depender de haber seleccionado a nadie ni de cuánto ocupe el
+        # desglose de abajo.
+        actions_row = ttk.Frame(detail_frame)
+        actions_row.pack(side="top", anchor="w", pady=(8, 0))
+        self.settings_button = ttk.Button(
+            actions_row,
+            text="Configurar % Seguridad Social...",
+            command=self._open_settings,
+        )
+        self.settings_button.pack(side="left")
+        self.sepa_export_button = ttk.Button(
+            actions_row,
+            text="Exportar SEPA (pago de nóminas)...",
+            command=self._open_sepa_export,
+        )
+        self.sepa_export_button.pack(side="left", padx=(6, 0))
+        self.gestoria_export_button = ttk.Button(
+            actions_row,
+            text="Exportar para gestoría...",
+            command=self._handle_gestoria_export,
+        )
+        self.gestoria_export_button.pack(side="left", padx=(6, 0))
+        if not self._is_admin:
+            self.settings_button.state(["disabled"])
+            self.sepa_export_button.state(["disabled"])
+            self.gestoria_export_button.state(["disabled"])
+
         self.employee_heading = ttk.Label(
             detail_frame, text="Selecciona un empleado", style="PageHeading.TLabel"
         )
@@ -395,15 +625,6 @@ class PayrollPage(ttk.Frame):
             self.history_tree.column(col, width=width, anchor="w")
         self.history_tree.pack(side="top", fill="x")
         self.history_tree.bind("<<TreeviewSelect>>", lambda _e: self._handle_history_select())
-
-        self.settings_button = ttk.Button(
-            detail_frame,
-            text="Configurar % Seguridad Social...",
-            command=self._open_settings,
-        )
-        self.settings_button.pack(side="top", anchor="w", pady=(16, 0))
-        if not self._is_admin:
-            self.settings_button.state(["disabled"])
 
     def apply_theme_change(self) -> None:
         """El aviso de Nóminas es un tk.Label con color fijado directamente
@@ -479,6 +700,44 @@ class PayrollPage(ttk.Frame):
 
     def _open_settings(self) -> None:
         PayrollSettingsDialog(self, self._repos, on_change=self._render_breakdown)
+
+    def _open_sepa_export(self) -> None:
+        SepaExportDialog(self, self._repos, self._view_year, self._view_month)
+
+    def _handle_gestoria_export(self) -> None:
+        records = self._repos.payroll_records.list_for_month(self._view_year, self._view_month)
+        if not records:
+            messagebox.showinfo(
+                "Exportar para gestoría",
+                "No hay ninguna nómina generada para este mes.",
+                parent=self,
+            )
+            return
+        departments_by_id = {d.id: d.name for d in self._departments if d.id is not None}
+        entries = []
+        for record in records:
+            employee = self._repos.employees.get(record.employee_id)
+            department_name = departments_by_id.get(employee.department_id, "—")
+            entries.append((employee, department_name, record))
+        rows = build_gestoria_rows(entries)
+
+        path_str = filedialog.asksaveasfilename(
+            title="Exportar para gestoría",
+            defaultextension=".csv",
+            filetypes=[("CSV", "*.csv")],
+            initialfile=f"gestoria_nominas_{self._view_year}{self._view_month:02d}.csv",
+            parent=self,
+        )
+        if not path_str:
+            return
+        try:
+            write_gestoria_csv(rows, Path(path_str))
+        except OSError as exc:
+            messagebox.showerror("Exportar para gestoría", str(exc), parent=self)
+            return
+        messagebox.showinfo(
+            "Exportar para gestoría", f"{len(rows)} nómina(s) exportada(s).", parent=self
+        )
 
     def _render_breakdown(self) -> None:
         self.month_label.configure(

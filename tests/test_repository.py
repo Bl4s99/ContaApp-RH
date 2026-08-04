@@ -2950,6 +2950,62 @@ class TestPayrollRecordRepository:
         april_totals = {d.department_id: d for d in repo.department_totals(2026, 4)}
         assert april_totals[department_id].payroll_count == 0
 
+    def test_list_for_month_returns_generated_records(
+        self, conn: sqlite3.Connection, employee_id: int
+    ) -> None:
+        PayrollRecordRepository(conn).generate(employee_id, 2026, 3)
+        records = PayrollRecordRepository(conn).list_for_month(2026, 3)
+        assert len(records) == 1
+        assert records[0].employee_id == employee_id
+
+    def test_list_for_month_excludes_other_months_and_years(
+        self, conn: sqlite3.Connection, employee_id: int
+    ) -> None:
+        repo = PayrollRecordRepository(conn)
+        repo.generate(employee_id, 2026, 3)
+        repo.generate(employee_id, 2026, 4)
+        repo.generate(employee_id, 2025, 3)
+        assert len(repo.list_for_month(2026, 3)) == 1
+
+    def test_list_for_month_empty_when_nothing_generated(self, conn: sqlite3.Connection) -> None:
+        assert PayrollRecordRepository(conn).list_for_month(2026, 3) == []
+
+    def test_list_for_month_scoped_to_department(
+        self, conn: sqlite3.Connection, department_id: int, employee_id: int
+    ) -> None:
+        other_department = DepartmentRepository(conn).create("Producción")
+        assert other_department.id is not None
+        other_employee = EmployeeRepository(conn).create(
+            make_input(department_id=other_department.id, email="otro@example.com")
+        )
+        assert other_employee.id is not None
+        repo = PayrollRecordRepository(conn)
+        repo.generate(employee_id, 2026, 3)
+        repo.generate(other_employee.id, 2026, 3)
+
+        scoped = repo.list_for_month(2026, 3, department_id=department_id)
+        assert [r.employee_id for r in scoped] == [employee_id]
+
+    def test_list_for_month_ordered_by_employee_name(
+        self, conn: sqlite3.Connection, department_id: int
+    ) -> None:
+        zeta = EmployeeRepository(conn).create(
+            make_input(
+                department_id=department_id, first_name="Zeta", email="zeta@example.com"
+            )
+        )
+        alfa = EmployeeRepository(conn).create(
+            make_input(
+                department_id=department_id, first_name="Alfa", email="alfa@example.com"
+            )
+        )
+        assert zeta.id is not None and alfa.id is not None
+        repo = PayrollRecordRepository(conn)
+        repo.generate(zeta.id, 2026, 3)
+        repo.generate(alfa.id, 2026, 3)
+        records = repo.list_for_month(2026, 3)
+        assert [r.employee_id for r in records] == [alfa.id, zeta.id]
+
 
 class TestPayrollSupplementRepository:
     @pytest.fixture()
@@ -3411,6 +3467,77 @@ class TestUserRepository:
         repo.clear_email_connection(user.id)
         assert repo.get_email_connection(user.id) is None
 
+    def test_new_user_defaults_to_not_receiving_crash_reports(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        repo = UserRepository(conn)
+        user = repo.create("admin", "admin123")
+        assert user.receive_crash_reports is False
+
+    def test_set_receive_crash_reports_requires_email_connection(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        repo = UserRepository(conn)
+        user = repo.create("admin", "admin123")
+        assert user.id is not None
+        with pytest.raises(RepositoryError):
+            repo.set_receive_crash_reports(user.id, True)
+
+    def test_set_receive_crash_reports_enables_with_email_connected(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        repo = UserRepository(conn)
+        user = repo.create("admin", "admin123")
+        assert user.id is not None
+        repo.set_email_connection(user.id, "gmail", "hr@example.com", "secret")
+        repo.set_receive_crash_reports(user.id, True)
+        assert repo.get(user.id).receive_crash_reports is True
+
+    def test_set_receive_crash_reports_can_disable(self, conn: sqlite3.Connection) -> None:
+        repo = UserRepository(conn)
+        user = repo.create("admin", "admin123")
+        assert user.id is not None
+        repo.set_email_connection(user.id, "gmail", "hr@example.com", "secret")
+        repo.set_receive_crash_reports(user.id, True)
+        repo.set_receive_crash_reports(user.id, False)
+        assert repo.get(user.id).receive_crash_reports is False
+
+    def test_clear_email_connection_also_disables_crash_reports(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        repo = UserRepository(conn)
+        user = repo.create("admin", "admin123")
+        assert user.id is not None
+        repo.set_email_connection(user.id, "gmail", "hr@example.com", "secret")
+        repo.set_receive_crash_reports(user.id, True)
+        repo.clear_email_connection(user.id)
+        assert repo.get(user.id).receive_crash_reports is False
+
+    def test_list_crash_report_recipients_empty_by_default(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        repo = UserRepository(conn)
+        repo.create("admin", "admin123")
+        assert repo.list_crash_report_recipients() == []
+
+    def test_list_crash_report_recipients_only_includes_opted_in_users(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        repo = UserRepository(conn)
+        subscribed = repo.create("admin1", "admin123")
+        connected_only = repo.create("admin2", "admin123")
+        assert subscribed.id is not None
+        assert connected_only.id is not None
+        repo.set_email_connection(subscribed.id, "gmail", "one@example.com", "secret")
+        repo.set_receive_crash_reports(subscribed.id, True)
+        repo.set_email_connection(connected_only.id, "outlook", "two@example.com", "secret")
+
+        recipients = repo.list_crash_report_recipients()
+
+        assert len(recipients) == 1
+        assert recipients[0].address == "one@example.com"
+        assert recipients[0].provider == "gmail"
+
     def test_needs_weekly_digest_false_without_email_connected(
         self, conn: sqlite3.Connection
     ) -> None:
@@ -3487,6 +3614,30 @@ class TestAppSettingsRepository:
     def test_set_data_retention_years_rejects_negative(self, conn: sqlite3.Connection) -> None:
         with pytest.raises(validation.ValidationError):
             AppSettingsRepository(conn).set_data_retention_years(-1)
+
+    def test_get_company_name_defaults_to_empty(self, conn: sqlite3.Connection) -> None:
+        assert AppSettingsRepository(conn).get_company_name() == ""
+
+    def test_set_company_name_persists(self, conn: sqlite3.Connection) -> None:
+        repo = AppSettingsRepository(conn)
+        repo.set_company_name("Empresa Ficticia S.L.")
+        assert repo.get_company_name() == "Empresa Ficticia S.L."
+
+    def test_set_company_name_rejects_too_long(self, conn: sqlite3.Connection) -> None:
+        with pytest.raises(validation.ValidationError):
+            AppSettingsRepository(conn).set_company_name("x" * 71)
+
+    def test_get_company_iban_defaults_to_empty(self, conn: sqlite3.Connection) -> None:
+        assert AppSettingsRepository(conn).get_company_iban() == ""
+
+    def test_set_company_iban_persists_formatted(self, conn: sqlite3.Connection) -> None:
+        repo = AppSettingsRepository(conn)
+        repo.set_company_iban("ES9121000418450200051332")
+        assert repo.get_company_iban() == "ES91 2100 0418 4502 0005 1332"
+
+    def test_set_company_iban_rejects_invalid_checksum(self, conn: sqlite3.Connection) -> None:
+        with pytest.raises(validation.ValidationError):
+            AppSettingsRepository(conn).set_company_iban("ES0021000418450200051332")
 
 
 class TestCollectiveAgreementRepository:

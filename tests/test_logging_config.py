@@ -115,3 +115,56 @@ class TestInstallTkExceptionHook:
             # nivel de CLASE (tk.Tk), así que sin esto afectaría a
             # cualquier otro test que comparta el tk_root de sesión.
             tk.Tk.report_callback_exception = original_hook
+
+    def test_calls_on_exception_after_logging(self, tk_root: tk.Tk, isolated_log: Path) -> None:
+        original_hook = tk.Tk.report_callback_exception
+        logging_config.configure_logging()
+        received: list[tuple[type[BaseException], BaseException]] = []
+        logging_config.install_tk_exception_hook(
+            on_exception=lambda exc, val: received.append((exc, val))
+        )
+
+        def _boom() -> None:
+            raise RuntimeError("boom con aviso adicional")
+
+        button = tk.Button(tk_root, text="x", command=_boom)
+        try:
+            button.invoke()
+            tk_root.update()
+            assert len(received) == 1
+            exc_type, exc_value = received[0]
+            assert exc_type is RuntimeError
+            assert str(exc_value) == "boom con aviso adicional"
+        finally:
+            button.destroy()
+            tk.Tk.report_callback_exception = original_hook
+
+    def test_a_failing_on_exception_is_caught_and_logged_not_propagated(
+        self, tk_root: tk.Tk, isolated_log: Path
+    ) -> None:
+        original_hook = tk.Tk.report_callback_exception
+        logging_config.configure_logging()
+
+        def _broken_notifier(
+            _exc: type[BaseException], _val: BaseException
+        ) -> None:
+            raise OSError("sin conexión de red")
+
+        logging_config.install_tk_exception_hook(on_exception=_broken_notifier)
+
+        def _boom() -> None:
+            raise RuntimeError("boom original")
+
+        button = tk.Button(tk_root, text="x", command=_boom)
+        try:
+            button.invoke()  # no debe propagar el OSError de _broken_notifier
+            tk_root.update()
+            logger = logging.getLogger(logging_config.LOGGER_NAME)
+            for handler in logger.handlers:
+                handler.flush()
+            content = isolated_log.read_text(encoding="utf-8")
+            assert "boom original" in content
+            assert "Fallo al ejecutar el aviso adicional de excepción" in content
+        finally:
+            button.destroy()
+            tk.Tk.report_callback_exception = original_hook

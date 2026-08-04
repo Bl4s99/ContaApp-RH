@@ -448,8 +448,39 @@ class AccountSettingsDialog(tk.Toplevel):
         self.email_error_label = ttk.Label(frame, text="", style="Error.TLabel", wraplength=320)
         self.email_error_label.grid(row=15, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
+        ttk.Separator(frame, orient="horizontal").grid(
+            row=16, column=0, columnspan=2, sticky="ew", pady=12
+        )
+
+        ttk.Label(
+            frame, text="Avisos si la aplicación falla", style="PageHeading.TLabel"
+        ).grid(row=17, column=0, columnspan=2, sticky="w", pady=(0, 4))
+        self.crash_reports_var = tk.BooleanVar(value=self._user.receive_crash_reports)
+        self.crash_reports_check = ttk.Checkbutton(
+            frame,
+            text="Avisarme por correo si la aplicación falla en este ordenador",
+            variable=self.crash_reports_var,
+            command=self._handle_toggle_crash_reports,
+        )
+        self.crash_reports_check.grid(row=18, column=0, columnspan=2, sticky="w")
+        self.crash_reports_error_label = ttk.Label(
+            frame, text="", style="Error.TLabel", wraplength=320
+        )
+        self.crash_reports_error_label.grid(row=19, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        ttk.Label(
+            frame,
+            text=(
+                "Usa el correo conectado arriba, así que hace falta conectarlo primero. "
+                "El aviso solo dice que hubo un fallo y de qué tipo — el detalle completo "
+                "se queda en el registro local de este ordenador (carpeta \"logs\"), "
+                "nunca en el correo."
+            ),
+            style="Muted.TLabel",
+            wraplength=340,
+        ).grid(row=20, column=0, columnspan=2, sticky="w", pady=(4, 6))
+
         ttk.Button(frame, text="Cerrar", command=self.destroy).grid(
-            row=16, column=0, columnspan=2, pady=(12, 0)
+            row=21, column=0, columnspan=2, pady=(12, 0)
         )
 
         self.bind("<Escape>", lambda _e: self.destroy())
@@ -467,6 +498,23 @@ class AccountSettingsDialog(tk.Toplevel):
             )
         else:
             self.email_status_label.configure(text="No conectado — no se envía resumen semanal.")
+        self.crash_reports_var.set(self._user.receive_crash_reports)
+        self.crash_reports_check.configure(
+            state="normal" if self._user.email_address is not None else "disabled"
+        )
+
+    def _handle_toggle_crash_reports(self) -> None:
+        assert self._user.id is not None
+        try:
+            self._repos.users.set_receive_crash_reports(
+                self._user.id, self.crash_reports_var.get()
+            )
+        except RepositoryError as exc:
+            self.crash_reports_error_label.configure(text=str(exc))
+            self.crash_reports_var.set(not self.crash_reports_var.get())
+            return
+        self.crash_reports_error_label.configure(text="")
+        self._refresh_email_status()
 
     def _handle_change_password(self) -> None:
         assert self._user.id is not None
@@ -748,8 +796,15 @@ class AuditLogDialog(tk.Toplevel):
 
 class MainWindow(tk.Tk):
     def __init__(
-        self, repos: Repositories, current_user: User, backups: BackupRepository
+        self, repos: Repositories, current_user: User, backups: BackupRepository | None
     ) -> None:
+        # backups es None cuando la conexión activa es PostgreSQL: la API de
+        # copia en caliente que usa BackupRepository es propia de sqlite3,
+        # sin equivalente directo aquí -- una empresa con su propio
+        # PostgreSQL ya tiene su propia estrategia de copias (la de su
+        # proveedor cloud, pg_dump, etc.), así que en vez de fingir que
+        # funciona, "Copias de seguridad..." se deshabilita en la barra
+        # lateral (ver _build_sidebar) en ese caso.
         super().__init__()
         self._repos = repos
         self._current_user = current_user
@@ -943,12 +998,15 @@ class MainWindow(tk.Tk):
                 command=self._open_collective_agreement_manager,
                 style="Sidebar.TButton",
             ).pack(fill="x", padx=10, pady=2)
-            ttk.Button(
+            backup_button = ttk.Button(
                 sidebar,
                 text="Copias de seguridad...",
                 command=self._open_backup_manager,
                 style="Sidebar.TButton",
-            ).pack(fill="x", padx=10, pady=2)
+            )
+            backup_button.pack(fill="x", padx=10, pady=2)
+            if self._backups is None:
+                backup_button.state(["disabled"])
             ttk.Button(
                 sidebar,
                 text="Registro de auditoría...",
@@ -1186,6 +1244,10 @@ class MainWindow(tk.Tk):
         self._employee_page.reload_professional_categories()
 
     def _open_backup_manager(self) -> None:
+        # El botón que llama a esto está deshabilitado cuando self._backups
+        # es None (ver _build_sidebar) -- no debería ser alcanzable, pero el
+        # assert deja además que mypy reduzca el tipo para BackupManagerDialog.
+        assert self._backups is not None
         dialog = BackupManagerDialog(self, self._repos, self._backups)
         self.wait_window(dialog)
 

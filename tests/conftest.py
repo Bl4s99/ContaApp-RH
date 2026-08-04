@@ -12,6 +12,17 @@ from app.database import get_connection, init_db
 @pytest.fixture()
 def conn() -> Iterator[sqlite3.Connection]:
     connection = get_connection(":memory:")
+    # Toda la suite asume SQLite real (algunos tests capturan
+    # sqlite3.IntegrityError directamente, por ejemplo) -- si
+    # GESTION_EMPLEADOS_DB_URL estuviera definida en el entorno de quien
+    # ejecuta los tests, get_connection() ignoraría ":memory:" y conectaría
+    # a un PostgreSQL real en su lugar, lo que ejecutaría toda la suite
+    # (con sus operaciones de escritura) contra una base de datos ajena sin
+    # avisar. Este assert lo convierte en un fallo inmediato y explícito en
+    # vez de un comportamiento silenciosamente distinto según el entorno.
+    assert isinstance(connection, sqlite3.Connection), (
+        "conn fixture esperaba SQLite -- ¿GESTION_EMPLEADOS_DB_URL está definida?"
+    )
     init_db(connection)
     try:
         yield connection

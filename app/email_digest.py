@@ -19,7 +19,7 @@ from email.message import EmailMessage
 from app.alerts import Alert
 from app.models import EmailConnection
 
-_SMTP_SERVERS = {
+SMTP_SERVERS = {
     "gmail": ("smtp.gmail.com", 587),
     "outlook": ("smtp.office365.com", 587),
 }
@@ -54,7 +54,7 @@ def build_digest_message(connection: EmailConnection, alerts: list[Alert]) -> Em
 
 
 def send_digest_email(connection: EmailConnection, alerts: list[Alert]) -> None:
-    host, port = _SMTP_SERVERS[connection.provider]
+    host, port = SMTP_SERVERS[connection.provider]
     message = build_digest_message(connection, alerts)
     with smtplib.SMTP(host, port, timeout=15) as smtp:
         smtp.starttls()

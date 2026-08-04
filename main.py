@@ -5,9 +5,11 @@ import sqlite3
 import sys
 from datetime import date, datetime
 from tkinter import messagebox
+from types import TracebackType
 
 from app.alerts import all_alerts, retention_review_alerts, training_expiry_alerts
 from app.backup import BackupRepository, apply_pending_restore
+from app.crash_report import notify_recipients_in_background
 from app.database import DEFAULT_DB_PATH, get_connection, init_db
 from app.email_digest import send_digest_email
 from app.login import LoginWindow
@@ -42,7 +44,6 @@ def main() -> None:
     # --windowed, que no tiene una consola donde ver un traceback.
     logger = configure_logging()
     sys.excepthook = log_uncaught_exception
-    install_tk_exception_hook()
     logger.info("Aplicación iniciada")
 
     # Debe ir antes de abrir ninguna conexión: si hay una restauración de
@@ -55,7 +56,34 @@ def main() -> None:
     try:
         init_db(conn)
         repos = Repositories.create(conn)
-        backups = BackupRepository(conn, DEFAULT_DB_PATH)
+        # BackupRepository usa la API de copia en caliente propia de
+        # sqlite3.Connection.backup(), sin equivalente aquí para
+        # PostgreSQL -- None en ese caso (una empresa con su propio
+        # PostgreSQL ya tiene su propia estrategia de copias). MainWindow
+        # deshabilita "Copias de seguridad..." en la barra lateral cuando
+        # recibe None, en vez de fingir que la función existe.
+        backups = BackupRepository(conn, DEFAULT_DB_PATH) if isinstance(conn, sqlite3.Connection) else None
+
+        def _notify_crash(exc_type: type[BaseException], _exc_value: BaseException) -> None:
+            # Se reinstala AQUÍ (no al principio de main(), donde ya se fija
+            # sys.excepthook) porque hace falta `repos` para saber a quién
+            # avisar -- un fallo antes de este punto (abrir la base de
+            # datos, por ejemplo) solo puede quedar en el log local, no hay
+            # ningún destinatario que consultar todavía.
+            recipients = repos.users.list_crash_report_recipients()
+            notify_recipients_in_background(recipients, exc_type.__name__, datetime.now())
+
+        def _handle_uncaught_exception(
+            exc_type: type[BaseException],
+            exc_value: BaseException,
+            exc_tb: TracebackType | None,
+        ) -> None:
+            log_uncaught_exception(exc_type, exc_value, exc_tb)
+            if not issubclass(exc_type, KeyboardInterrupt):
+                _notify_crash(exc_type, exc_value)
+
+        sys.excepthook = _handle_uncaught_exception
+        install_tk_exception_hook(on_exception=_notify_crash)
 
         if not repos.departments.list_all():
             repos.departments.create("General")
@@ -69,7 +97,7 @@ def main() -> None:
             repos.users.create("admin", "admin")
 
         backup_error: str | None = None
-        if not backups.has_backup_today():
+        if backups is not None and not backups.has_backup_today():
             try:
                 backups.create_backup()
             except (OSError, sqlite3.Error) as exc:

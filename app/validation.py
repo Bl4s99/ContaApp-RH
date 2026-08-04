@@ -184,6 +184,18 @@ def validate_iban(value: str) -> str:
     return " ".join(compact[i : i + 4] for i in range(0, len(compact), 4))
 
 
+MAX_COMPANY_NAME_LENGTH = 70  # límite real del campo <Nm> en SEPA pain.001
+
+
+def validate_company_name(value: str) -> str:
+    stripped = value.strip()
+    if len(stripped) > MAX_COMPANY_NAME_LENGTH:
+        raise ValidationError(
+            "nombre_empresa", f"no puede superar {MAX_COMPANY_NAME_LENGTH} caracteres"
+        )
+    return stripped
+
+
 _DNI_RE = re.compile(r"^(\d{8})([A-Za-z])$")
 _NIE_RE = re.compile(r"^([XYZxyz])(\d{7})([A-Za-z])$")
 _DNI_NIE_CONTROL_LETTERS = "TRWAGMYFPDXBNJZSQVHLCKE"
