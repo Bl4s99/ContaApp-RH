@@ -7,11 +7,12 @@ from app.alerts import (
     birthday_alerts,
     contract_expiry_alerts,
     medical_checkup_alerts,
+    professional_category_minimum_salary_alerts,
     prl_training_pending_alerts,
     retention_review_alerts,
     training_expiry_alerts,
 )
-from app.models import Employee, EmployeeTraining
+from app.models import Employee, EmployeeTraining, ProfessionalCategory
 
 TODAY = date(2026, 7, 23)
 
@@ -61,6 +62,14 @@ def make_training(**overrides: object) -> EmployeeTraining:
     )
     defaults.update(overrides)
     return EmployeeTraining(**defaults)  # type: ignore[arg-type]
+
+
+def make_category(**overrides: object) -> ProfessionalCategory:
+    defaults: dict[str, object] = dict(
+        id=1, collective_agreement_id=1, name="Oficial de primera", minimum_salary=20000.0
+    )
+    defaults.update(overrides)
+    return ProfessionalCategory(**defaults)  # type: ignore[arg-type]
 
 
 class TestContractExpiryAlerts:
@@ -378,3 +387,72 @@ class TestTrainingExpiryAlerts:
     def test_empty_trainings_list_gives_no_alerts(self) -> None:
         emp = make_employee(id=1)
         assert training_expiry_alerts([emp], [], TODAY, within_days=30) == []
+
+
+class TestProfessionalCategoryMinimumSalaryAlerts:
+    def test_salary_below_minimum_generates_an_alert(self) -> None:
+        emp = make_employee(id=1, professional_category_id=1, salary=18000.0)
+        category = make_category(id=1, minimum_salary=20000.0)
+        [alert] = professional_category_minimum_salary_alerts([emp], [category], TODAY)
+        assert alert.category == "salario_minimo"
+        assert alert.employee_id == 1
+        assert alert.target_date == emp.hire_date
+
+    def test_salary_at_minimum_generates_no_alert(self) -> None:
+        emp = make_employee(professional_category_id=1, salary=20000.0)
+        category = make_category(id=1, minimum_salary=20000.0)
+        assert professional_category_minimum_salary_alerts([emp], [category], TODAY) == []
+
+    def test_salary_above_minimum_generates_no_alert(self) -> None:
+        emp = make_employee(professional_category_id=1, salary=25000.0)
+        category = make_category(id=1, minimum_salary=20000.0)
+        assert professional_category_minimum_salary_alerts([emp], [category], TODAY) == []
+
+    def test_employee_without_a_category_generates_no_alert(self) -> None:
+        emp = make_employee(professional_category_id=None, salary=1000.0)
+        category = make_category(id=1, minimum_salary=20000.0)
+        assert professional_category_minimum_salary_alerts([emp], [category], TODAY) == []
+
+    def test_category_missing_from_the_given_list_generates_no_alert(self) -> None:
+        # Mismo criterio que training_expiry_alerts() con un empleado fuera
+        # de la lista: si el catálogo ya viene acotado desde el llamante, una
+        # referencia que no aparece en él simplemente no genera alerta.
+        emp = make_employee(professional_category_id=999, salary=1000.0)
+        category = make_category(id=1, minimum_salary=20000.0)
+        assert professional_category_minimum_salary_alerts([emp], [category], TODAY) == []
+
+    def test_inactive_employee_generates_no_alert_even_if_below_minimum(self) -> None:
+        emp = make_employee(active=False, professional_category_id=1, salary=1000.0)
+        category = make_category(id=1, minimum_salary=20000.0)
+        assert professional_category_minimum_salary_alerts([emp], [category], TODAY) == []
+
+    def test_detail_reports_the_exact_shortfall_and_category_name(self) -> None:
+        emp = make_employee(professional_category_id=1, salary=18500.0)
+        category = make_category(id=1, name="Oficial de segunda", minimum_salary=20000.0)
+        [alert] = professional_category_minimum_salary_alerts([emp], [category], TODAY)
+        assert "1.500,00 €" in alert.detail
+        assert "Oficial de segunda" in alert.detail
+        assert "20.000,00 €" in alert.detail
+
+    def test_days_remaining_is_negative_for_an_employee_hired_in_the_past(self) -> None:
+        emp = make_employee(hire_date=TODAY - timedelta(days=100), professional_category_id=1, salary=1000.0)
+        category = make_category(id=1, minimum_salary=20000.0)
+        [alert] = professional_category_minimum_salary_alerts([emp], [category], TODAY)
+        assert alert.days_remaining == -100
+
+    def test_multiple_alerts_sorted_by_hire_date(self) -> None:
+        newer = make_employee(
+            id=1, email="a@x.com", hire_date=date(2021, 1, 1),
+            professional_category_id=1, salary=1000.0,
+        )
+        older = make_employee(
+            id=2, email="b@x.com", hire_date=date(2019, 1, 1),
+            professional_category_id=1, salary=1000.0,
+        )
+        category = make_category(id=1, minimum_salary=20000.0)
+        alerts = professional_category_minimum_salary_alerts([newer, older], [category], TODAY)
+        assert [a.employee_id for a in alerts] == [2, 1]
+
+    def test_empty_categories_list_gives_no_alerts(self) -> None:
+        emp = make_employee(professional_category_id=1, salary=1000.0)
+        assert professional_category_minimum_salary_alerts([emp], [], TODAY) == []

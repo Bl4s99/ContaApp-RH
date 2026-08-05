@@ -1,15 +1,19 @@
 """Cálculo puro de alertas de RRHH (contratos próximos a vencer, cumpleaños
 próximos, revisiones médicas próximas o vencidas, revisión de anonimización
 RGPD pendiente, formación PRL pendiente, certificaciones próximas a caducar
-o ya caducadas) a partir de la lista de empleados -- sin acceso a UI ni base
-de datos, misma filosofía que payroll.py/vacation.py/time_tracking.py.
+o ya caducadas, salario por debajo del mínimo de categoría profesional) a
+partir de la lista de empleados -- sin acceso a UI ni base de datos, misma
+filosofía que payroll.py/vacation.py/time_tracking.py.
 contract_expiry_alerts/birthday_alerts/medical_checkup_alerts/
-prl_training_pending_alerts/training_expiry_alerts solo tienen sentido para
-un empleado ACTIVO (ya no está en plantilla, si no); retention_review_alerts()
+prl_training_pending_alerts/training_expiry_alerts/
+professional_category_minimum_salary_alerts solo tienen sentido para un
+empleado ACTIVO (ya no está en plantilla, si no); retention_review_alerts()
 es la excepción deliberada: mira justo a los empleados INACTIVOS que las
-demás excluyen. training_expiry_alerts() es también la única que necesita
-algo más que `employees`: una certificación con fecha de caducidad vive en
-EmployeeTraining (un empleado puede tener varias), no en un campo del
+demás excluyen. training_expiry_alerts() y
+professional_category_minimum_salary_alerts() son también las únicas que
+necesitan algo más que `employees`: una certificación con fecha de caducidad
+vive en EmployeeTraining (un empleado puede tener varias), y el mínimo
+salarial vive en ProfessionalCategory -- ninguna de las dos es un campo del
 propio Employee como las demás fechas de este módulo.
 """
 from __future__ import annotations
@@ -17,7 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 
-from app.models import Employee, EmployeeTraining
+from app.models import Employee, EmployeeTraining, ProfessionalCategory
 
 DEFAULT_ALERT_WINDOW_DAYS = 30
 
@@ -27,7 +31,7 @@ class Alert:
     employee_id: int
     employee_name: str
     # "contrato" | "cumpleanos" | "revision_medica" | "retencion_rgpd" |
-    # "formacion_prl" | "certificacion"
+    # "formacion_prl" | "certificacion" | "salario_minimo"
     category: str
     target_date: date
     days_remaining: int  # negativo si ya venció/pasó
@@ -212,6 +216,64 @@ def training_expiry_alerts(
                 employee_name=emp.full_name,
                 category="certificacion",
                 target_date=training.expiration_date,
+                days_remaining=days_remaining,
+                detail=detail,
+            )
+        )
+    return sorted(alerts, key=lambda a: a.target_date)
+
+
+def _format_currency(value: float) -> str:
+    # Formato español (punto de millar, coma decimal), igual que
+    # employee_page._format_currency -- se duplica en vez de importarse
+    # porque esa es privada al módulo y esta app no tiene todavía un sitio
+    # común de utilidades de formato compartido entre páginas. Además,
+    # este módulo es deliberadamente puro (sin imports de la capa de UI).
+    us_formatted = f"{value:,.2f}"
+    integer_part, decimal_part = us_formatted.split(".")
+    integer_part = integer_part.replace(",", ".")
+    return f"{integer_part},{decimal_part} €"
+
+
+def professional_category_minimum_salary_alerts(
+    employees: list[Employee], categories: list[ProfessionalCategory], today: date
+) -> list[Alert]:
+    """Empleados activos con categoría profesional asignada cuyo salario
+    actual queda por debajo del mínimo de esa categoría
+    (ProfessionalCategory.minimum_salary) -- el catálogo y la asignación ya
+    existían, pero hasta ahora nada comparaba ambos datos ni avisaba.
+
+    A diferencia de las demás alertas de este módulo, no hay una fecha real
+    de cuándo empezó a estar por debajo del mínimo: el salario o la propia
+    categoría pudieron cambiar en cualquier momento, y esta app no cruza esa
+    combinación exacta con el historial de puesto/salario. Se usa
+    `hire_date` como aproximación simple para poder ordenarla junto a las
+    demás alertas y para que aparezca resaltada en rojo (siempre en el
+    pasado salvo alta el mismo día) -- mismo criterio ya usado por
+    `prl_training_pending_alerts()`, no una afirmación de que lleva
+    exactamente ese tiempo por debajo. El importe de diferencia en el
+    detalle sí es exacto, calculado sobre los datos actuales."""
+    categories_by_id = {category.id: category for category in categories}
+    alerts = []
+    for emp in employees:
+        if not emp.active or emp.professional_category_id is None:
+            continue
+        category = categories_by_id.get(emp.professional_category_id)
+        if category is None or emp.salary >= category.minimum_salary:
+            continue
+        assert emp.id is not None
+        days_remaining = (emp.hire_date - today).days
+        shortfall = category.minimum_salary - emp.salary
+        detail = (
+            f"Salario {_format_currency(shortfall)} por debajo del mínimo de "
+            f"'{category.name}' ({_format_currency(category.minimum_salary)}/año)"
+        )
+        alerts.append(
+            Alert(
+                employee_id=emp.id,
+                employee_name=emp.full_name,
+                category="salario_minimo",
+                target_date=emp.hire_date,
                 days_remaining=days_remaining,
                 detail=detail,
             )

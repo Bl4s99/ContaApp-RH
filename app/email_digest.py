@@ -31,6 +31,7 @@ _CATEGORY_LABELS = {
     "retencion_rgpd": "Retención RGPD",
     "formacion_prl": "Formación PRL",
     "certificacion": "Certificación",
+    "salario_minimo": "Salario mínimo",
 }
 
 

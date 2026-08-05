@@ -7,7 +7,12 @@ from datetime import date, datetime
 from tkinter import messagebox
 from types import TracebackType
 
-from app.alerts import all_alerts, retention_review_alerts, training_expiry_alerts
+from app.alerts import (
+    all_alerts,
+    professional_category_minimum_salary_alerts,
+    retention_review_alerts,
+    training_expiry_alerts,
+)
 from app.backup import BackupRepository, apply_pending_restore
 from app.crash_report import notify_recipients_in_background
 from app.database import DEFAULT_DB_PATH, get_connection, init_db
@@ -131,10 +136,12 @@ def main() -> None:
                 today = date.today()
                 retention_years = repos.app_settings.get_data_retention_years()
                 trainings = repos.trainings.list_all()
+                categories = repos.professional_categories.list_all()
                 alerts = sorted(
                     all_alerts(employees, today)
                     + retention_review_alerts(employees, today, retention_years)
-                    + training_expiry_alerts(employees, trainings, today),
+                    + training_expiry_alerts(employees, trainings, today)
+                    + professional_category_minimum_salary_alerts(employees, categories, today),
                     key=lambda a: a.target_date,
                 )
                 send_digest_email(connection, alerts)

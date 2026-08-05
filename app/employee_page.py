@@ -1819,21 +1819,24 @@ class EmployeeFichaPanel(ttk.Frame):
         self.error_label.grid(row=row, column=0, columnspan=2, sticky="w", pady=(8, 0))
         row += 1
 
-        button_row = ttk.Frame(fields)
-        button_row.grid(row=row, column=0, columnspan=2, sticky="w", pady=(10, 0))
+        # Cada botón en su propia fila (mismo motivo que view_severance_button
+        # más abajo): los tres juntos no caben en el ancho por defecto del
+        # panel de ficha y "Ver calendario..." quedaba recortado.
         self.save_button = ttk.Button(
-            button_row,
+            fields,
             text="Guardar cambios",
             command=self._handle_save,
             style="Accent.TButton",
         )
-        self.save_button.pack(side="left", padx=(0, 6))
+        self.save_button.grid(row=row, column=0, columnspan=2, sticky="w", pady=(10, 2))
+        row += 1
         self.calendar_button = ttk.Button(
-            button_row, text="Ver calendario...", command=self._handle_view_calendar
+            fields, text="Ver calendario...", command=self._handle_view_calendar
         )
-        self.calendar_button.pack(side="left", padx=(0, 6))
-        self.delete_button = ttk.Button(button_row, text="Eliminar", command=self._handle_delete)
-        self.delete_button.pack(side="left")
+        self.calendar_button.grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 2))
+        row += 1
+        self.delete_button = ttk.Button(fields, text="Eliminar", command=self._handle_delete)
+        self.delete_button.grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 3))
         row += 1
 
         ttk.Label(fields, text="Incorporación", style="PageHeading.TLabel").grid(
@@ -1874,25 +1877,30 @@ class EmployeeFichaPanel(ttk.Frame):
         doc_vsb.pack(side="left", fill="y")
         row += 1
 
-        doc_button_row = ttk.Frame(fields)
-        doc_button_row.grid(row=row, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        # Cada botón en su propia fila (mismo motivo que en "Guardar
+        # cambios"/"Ver calendario..." más arriba): los cuatro juntos no
+        # caben ni de lejos en el ancho por defecto del panel de ficha.
         self.upload_document_button = ttk.Button(
-            doc_button_row, text="Adjuntar documento...", command=self._handle_upload_document
+            fields, text="Adjuntar documento...", command=self._handle_upload_document
         )
-        self.upload_document_button.pack(side="left", padx=(0, 6))
+        self.upload_document_button.grid(row=row, column=0, columnspan=2, sticky="w", pady=(6, 2))
+        row += 1
         self.generate_document_button = ttk.Button(
-            doc_button_row, text="Generar documento...", command=self._handle_generate_document
+            fields, text="Generar documento...", command=self._handle_generate_document
         )
-        self.generate_document_button.pack(side="left", padx=(0, 6))
+        self.generate_document_button.grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 2))
+        row += 1
+        ttk.Button(fields, text="Descargar", command=self._handle_download_document).grid(
+            row=row, column=0, columnspan=2, sticky="w", pady=(0, 2)
+        )
+        row += 1
         ttk.Button(
-            doc_button_row, text="Descargar", command=self._handle_download_document
-        ).pack(side="left", padx=(0, 6))
-        ttk.Button(
-            doc_button_row, text="Eliminar documento", command=self._handle_delete_document
-        ).pack(side="left")
+            fields, text="Eliminar documento", command=self._handle_delete_document
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 2))
+        row += 1
         self.documents_error_label = ttk.Label(fields, text="", style="Error.TLabel", wraplength=380)
-        self.documents_error_label.grid(row=row + 1, column=0, columnspan=2, sticky="w", pady=(4, 0))
-        row += 2
+        self.documents_error_label.grid(row=row, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        row += 1
 
         ttk.Label(fields, text="Historial de puesto y salario", style="PageHeading.TLabel").grid(
             row=row, column=0, columnspan=2, sticky="w", pady=(16, 4)
@@ -1955,19 +1963,20 @@ class EmployeeFichaPanel(ttk.Frame):
         accident_vsb.pack(side="left", fill="y")
         row += 1
 
-        accident_button_row = ttk.Frame(fields)
-        accident_button_row.grid(row=row, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        # Cada botón en su propia fila (mismo motivo que en "Guardar
+        # cambios"/"Ver calendario..." más arriba): juntos no caben en el
+        # ancho por defecto del panel de ficha.
         ttk.Button(
-            accident_button_row,
-            text="Registrar accidente...",
-            command=self._handle_register_accident,
-        ).pack(side="left", padx=(0, 6))
+            fields, text="Registrar accidente...", command=self._handle_register_accident
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(6, 2))
+        row += 1
         ttk.Button(
-            accident_button_row, text="Eliminar accidente", command=self._handle_delete_accident
-        ).pack(side="left")
+            fields, text="Eliminar accidente", command=self._handle_delete_accident
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 2))
+        row += 1
         self.accidents_error_label = ttk.Label(fields, text="", style="Error.TLabel", wraplength=380)
-        self.accidents_error_label.grid(row=row + 1, column=0, columnspan=2, sticky="w", pady=(4, 0))
-        row += 2
+        self.accidents_error_label.grid(row=row, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        row += 1
 
         ttk.Label(fields, text="Incapacidad temporal", style="PageHeading.TLabel").grid(
             row=row, column=0, columnspan=2, sticky="w", pady=(16, 4)
@@ -2000,21 +2009,21 @@ class EmployeeFichaPanel(ttk.Frame):
         self.it_episodes_tree.bind("<Double-1>", lambda _e: self._handle_view_it_episode())
         row += 1
 
-        it_button_row = ttk.Frame(fields)
-        it_button_row.grid(row=row, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        # Cada botón en su propia fila (mismo motivo que en "Guardar
+        # cambios"/"Ver calendario..." más arriba).
         ttk.Button(
-            it_button_row,
-            text="Registrar baja (IT)...",
-            command=self._handle_register_it_episode,
-        ).pack(side="left", padx=(0, 6))
+            fields, text="Registrar baja (IT)...", command=self._handle_register_it_episode
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(6, 2))
+        row += 1
         ttk.Button(
-            it_button_row, text="Ver / gestionar...", command=self._handle_view_it_episode
-        ).pack(side="left")
+            fields, text="Ver / gestionar...", command=self._handle_view_it_episode
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 2))
+        row += 1
         self.it_episodes_error_label = ttk.Label(
             fields, text="", style="Error.TLabel", wraplength=380
         )
-        self.it_episodes_error_label.grid(row=row + 1, column=0, columnspan=2, sticky="w", pady=(4, 0))
-        row += 2
+        self.it_episodes_error_label.grid(row=row, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        row += 1
 
         ttk.Label(fields, text="Formación y certificaciones", style="PageHeading.TLabel").grid(
             row=row, column=0, columnspan=2, sticky="w", pady=(16, 4)
@@ -2045,21 +2054,21 @@ class EmployeeFichaPanel(ttk.Frame):
         training_vsb.pack(side="left", fill="y")
         row += 1
 
-        training_button_row = ttk.Frame(fields)
-        training_button_row.grid(row=row, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        # Cada botón en su propia fila (mismo motivo que en "Guardar
+        # cambios"/"Ver calendario..." más arriba).
         ttk.Button(
-            training_button_row,
-            text="Añadir formación...",
-            command=self._handle_add_training,
-        ).pack(side="left", padx=(0, 6))
+            fields, text="Añadir formación...", command=self._handle_add_training
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(6, 2))
+        row += 1
         ttk.Button(
-            training_button_row, text="Eliminar formación", command=self._handle_delete_training
-        ).pack(side="left")
+            fields, text="Eliminar formación", command=self._handle_delete_training
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 2))
+        row += 1
         self.trainings_error_label = ttk.Label(
             fields, text="", style="Error.TLabel", wraplength=380
         )
-        self.trainings_error_label.grid(row=row + 1, column=0, columnspan=2, sticky="w", pady=(4, 0))
-        row += 2
+        self.trainings_error_label.grid(row=row, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        row += 1
 
         ttk.Label(fields, text="Autoservicio", style="PageHeading.TLabel").grid(
             row=row, column=0, columnspan=2, sticky="w", pady=(16, 4)
@@ -2079,16 +2088,15 @@ class EmployeeFichaPanel(ttk.Frame):
         self.self_service_status_label.grid(row=row, column=0, columnspan=2, sticky="w", pady=(4, 0))
         row += 1
 
-        self_service_button_row = ttk.Frame(fields)
-        self_service_button_row.grid(row=row, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        # Cada botón en su propia fila (mismo motivo que en "Guardar
+        # cambios"/"Ver calendario..." más arriba).
         ttk.Button(
-            self_service_button_row,
-            text="Establecer PIN...",
-            command=self._handle_set_self_service_pin,
-        ).pack(side="left", padx=(0, 6))
+            fields, text="Establecer PIN...", command=self._handle_set_self_service_pin
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(6, 2))
+        row += 1
         ttk.Button(
-            self_service_button_row, text="Quitar PIN", command=self._handle_clear_self_service_pin
-        ).pack(side="left")
+            fields, text="Quitar PIN", command=self._handle_clear_self_service_pin
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 2))
         row += 1
 
         self.self_service_error_label = ttk.Label(
@@ -2128,19 +2136,19 @@ class EmployeeFichaPanel(ttk.Frame):
         objectives_vsb.pack(side="left", fill="y")
         row += 1
 
-        objectives_button_row = ttk.Frame(fields)
-        objectives_button_row.grid(row=row, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        # Cada botón en su propia fila (mismo motivo que en "Guardar
+        # cambios"/"Ver calendario..." más arriba): los tres juntos no caben.
         ttk.Button(
-            objectives_button_row, text="Añadir objetivo...", command=self._handle_add_objective
-        ).pack(side="left", padx=(0, 6))
+            fields, text="Añadir objetivo...", command=self._handle_add_objective
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(6, 2))
+        row += 1
         ttk.Button(
-            objectives_button_row,
-            text="Cambiar estado...",
-            command=self._handle_change_objective_status,
-        ).pack(side="left", padx=(0, 6))
+            fields, text="Cambiar estado...", command=self._handle_change_objective_status
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 2))
+        row += 1
         ttk.Button(
-            objectives_button_row, text="Eliminar objetivo", command=self._handle_delete_objective
-        ).pack(side="left")
+            fields, text="Eliminar objetivo", command=self._handle_delete_objective
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 2))
         row += 1
 
         self.objectives_error_label = ttk.Label(
@@ -2171,19 +2179,21 @@ class EmployeeFichaPanel(ttk.Frame):
         reviews_vsb.pack(side="left", fill="y")
         row += 1
 
-        reviews_button_row = ttk.Frame(fields)
-        reviews_button_row.grid(row=row, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        # Cada botón en su propia fila (mismo motivo que en "Guardar
+        # cambios"/"Ver calendario..." más arriba): "Eliminar evaluación"
+        # quedaba recortado a "Eliminar ev".
         ttk.Button(
-            reviews_button_row, text="Añadir evaluación...", command=self._handle_add_review
-        ).pack(side="left", padx=(0, 6))
+            fields, text="Añadir evaluación...", command=self._handle_add_review
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(6, 2))
+        row += 1
         ttk.Button(
-            reviews_button_row, text="Eliminar evaluación", command=self._handle_delete_review
-        ).pack(side="left")
+            fields, text="Eliminar evaluación", command=self._handle_delete_review
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 2))
         row += 1
 
         self.reviews_error_label = ttk.Label(fields, text="", style="Error.TLabel", wraplength=380)
         self.reviews_error_label.grid(row=row, column=0, columnspan=2, sticky="w", pady=(4, 0))
-        row += 2
+        row += 1
 
         ttk.Label(fields, text="Equipo asignado", style="PageHeading.TLabel").grid(
             row=row, column=0, columnspan=2, sticky="w", pady=(16, 4)
@@ -2214,26 +2224,26 @@ class EmployeeFichaPanel(ttk.Frame):
         equipment_vsb.pack(side="left", fill="y")
         row += 1
 
-        equipment_button_row = ttk.Frame(fields)
-        equipment_button_row.grid(row=row, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        # Cada botón en su propia fila (mismo motivo que en "Guardar
+        # cambios"/"Ver calendario..." más arriba): los tres juntos no caben.
         ttk.Button(
-            equipment_button_row, text="Añadir equipo...", command=self._handle_add_equipment
-        ).pack(side="left", padx=(0, 6))
+            fields, text="Añadir equipo...", command=self._handle_add_equipment
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(6, 2))
+        row += 1
         ttk.Button(
-            equipment_button_row,
-            text="Marcar como devuelto...",
-            command=self._handle_mark_equipment_returned,
-        ).pack(side="left", padx=(0, 6))
+            fields, text="Marcar como devuelto...", command=self._handle_mark_equipment_returned
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 2))
+        row += 1
         ttk.Button(
-            equipment_button_row, text="Eliminar equipo", command=self._handle_delete_equipment
-        ).pack(side="left")
+            fields, text="Eliminar equipo", command=self._handle_delete_equipment
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 2))
         row += 1
 
         self.equipment_error_label = ttk.Label(
             fields, text="", style="Error.TLabel", wraplength=380
         )
         self.equipment_error_label.grid(row=row, column=0, columnspan=2, sticky="w", pady=(4, 0))
-        row += 2
+        row += 1
 
     def _add_entry_row(
         self, parent: ttk.Frame, row: int, label: str, var: tk.StringVar

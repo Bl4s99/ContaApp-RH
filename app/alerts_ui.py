@@ -8,6 +8,7 @@ from app import theme
 from app.alerts import (
     DEFAULT_ALERT_WINDOW_DAYS,
     all_alerts,
+    professional_category_minimum_salary_alerts,
     retention_review_alerts,
     training_expiry_alerts,
 )
@@ -20,6 +21,7 @@ _CATEGORY_LABELS = {
     "retencion_rgpd": "Retención RGPD",
     "formacion_prl": "Formación PRL",
     "certificacion": "Certificación",
+    "salario_minimo": "Salario mínimo",
 }
 
 
@@ -42,9 +44,10 @@ class AlertsPage(ttk.Frame):
             text=(
                 f"Contratos que vencen en los próximos {DEFAULT_ALERT_WINDOW_DAYS} días, "
                 "cumpleaños próximos, revisiones médicas próximas o pendientes, formación "
-                "PRL pendiente y certificaciones próximas a caducar o ya caducadas, para "
-                "empleados activos; y empleados de baja cuyo periodo de conservación de "
-                "datos está por vencer o ya venció. Las filas en rojo ya están vencidas."
+                "PRL pendiente, certificaciones próximas a caducar o ya caducadas y salarios "
+                "por debajo del mínimo de su categoría profesional, para empleados activos; "
+                "y empleados de baja cuyo periodo de conservación de datos está por vencer o "
+                "ya venció. Las filas en rojo ya están vencidas."
             ),
             style="Muted.TLabel",
             wraplength=640,
@@ -87,10 +90,15 @@ class AlertsPage(ttk.Frame):
         # trainings sin acotar por departamento -- training_expiry_alerts()
         # ya descarta las que no pertenecen a `employees` (ver su docstring).
         trainings = self._repos.trainings.list_all()
+        # Igual que trainings: el catálogo de categorías no se acota por
+        # departamento, professional_category_minimum_salary_alerts() ya
+        # descarta lo que no pertenece a `employees`.
+        categories = self._repos.professional_categories.list_all()
         alerts = sorted(
             all_alerts(employees, today)
             + retention_review_alerts(employees, today, retention_years)
-            + training_expiry_alerts(employees, trainings, today),
+            + training_expiry_alerts(employees, trainings, today)
+            + professional_category_minimum_salary_alerts(employees, categories, today),
             key=lambda a: a.target_date,
         )
         for idx, alert in enumerate(alerts):
