@@ -1,6 +1,6 @@
 """Capa de conexión configurable: SQLite (por defecto, sin ningún cambio de
 comportamiento -- ver database.get_connection()) o PostgreSQL, activado
-poniendo la variable de entorno GESTION_EMPLEADOS_DB_URL a una URL
+poniendo la variable de entorno CONTAAPP_RH_DB_URL a una URL
 postgresql://. Pensada para el modelo de "cada empresa, su propia
 instalación" (ver README): la mayoría seguirá con SQLite sin tocar nada;
 una empresa que ya tenga su propio PostgreSQL puede apuntar la app ahí
@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 
     import sqlalchemy
 
-DB_URL_ENV_VAR = "GESTION_EMPLEADOS_DB_URL"
+DB_URL_ENV_VAR = "CONTAAPP_RH_DB_URL"
 
 
 @runtime_checkable

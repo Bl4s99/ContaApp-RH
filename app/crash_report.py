@@ -32,7 +32,7 @@ from app.models import EmailConnection
 
 def build_crash_report_text(exception_type_name: str, occurred_at: datetime) -> str:
     return (
-        "La aplicación Gestión de Empleados tuvo un fallo no controlado "
+        "La aplicación ContaApp RH tuvo un fallo no controlado "
         f"el {occurred_at:%d/%m/%Y} a las {occurred_at:%H:%M}.\n\n"
         f"Tipo de excepción: {exception_type_name}\n\n"
         "Por privacidad, este aviso no incluye el mensaje completo del "
@@ -45,7 +45,7 @@ def build_crash_report_message(
     connection: EmailConnection, exception_type_name: str, occurred_at: datetime
 ) -> EmailMessage:
     message = EmailMessage()
-    message["Subject"] = f"Gestión de Empleados — fallo detectado ({exception_type_name})"
+    message["Subject"] = f"ContaApp RH — fallo detectado ({exception_type_name})"
     message["From"] = connection.address
     message["To"] = connection.address
     message.set_content(build_crash_report_text(exception_type_name, occurred_at))

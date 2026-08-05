@@ -16,7 +16,7 @@ from app import logging_config
 @pytest.fixture()
 def isolated_log(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     """Redirige LOG_DIR/LOG_FILE a un directorio temporal y deja el logger
-    "gestion_empleados" limpio antes y después de cada test -- es un
+    "contaapp_rh" limpio antes y después de cada test -- es un
     logger con nombre global (logging.getLogger reutiliza la misma
     instancia en todo el proceso), así que un handler que sobreviviera a
     un test intentaría escribir en un tmp_path ya borrado desde cualquier

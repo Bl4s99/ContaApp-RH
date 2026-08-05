@@ -11,7 +11,7 @@ from app.paths import app_dir
 
 LOG_DIR = app_dir() / "logs"
 LOG_FILE = LOG_DIR / "app.log"
-LOGGER_NAME = "gestion_empleados"
+LOGGER_NAME = "contaapp_rh"
 
 # Los mensajes que se registran aquí (excepciones no controladas, fallos de
 # backup/envío de correo) son siempre trazas técnicas -- ningún punto de

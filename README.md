@@ -1,4 +1,4 @@
-# Gestión de Empleados
+# ContaApp RH
 
 Aplicación de escritorio simple para gestionar empleados. Interfaz en Tkinter, datos en SQLite. Una única dependencia externa en tiempo de ejecución: **Pillow**, para procesar las fotos de empleado.
 
@@ -224,10 +224,10 @@ Genera `empleados_ficticios.csv` (50 empleados ficticios, editable) y carga ese 
 
 ## Base de datos configurable (SQLite / PostgreSQL)
 
-Por defecto la aplicación sigue usando SQLite (`empleados.db`), sin ningún cambio de comportamiento ni de configuración adicional. Para una instalación que prefiera un servidor PostgreSQL propio (por ejemplo, una empresa que ya tenga uno integrado en su infraestructura), basta con definir la variable de entorno `GESTION_EMPLEADOS_DB_URL` con una URL de conexión antes de arrancar la app:
+Por defecto la aplicación sigue usando SQLite (`empleados.db`), sin ningún cambio de comportamiento ni de configuración adicional. Para una instalación que prefiera un servidor PostgreSQL propio (por ejemplo, una empresa que ya tenga uno integrado en su infraestructura), basta con definir la variable de entorno `CONTAAPP_RH_DB_URL` con una URL de conexión antes de arrancar la app:
 
 ```
-set GESTION_EMPLEADOS_DB_URL=postgresql://usuario:contraseña@servidor:5432/empleados
+set CONTAAPP_RH_DB_URL=postgresql://usuario:contraseña@servidor:5432/empleados
 py main.py
 ```
 
@@ -239,7 +239,7 @@ Sin esa variable definida, `get_connection()` se comporta exactamente igual que 
 
 **Límite conocido, dicho con la misma franqueza que el resto de este documento**: este entorno de desarrollo no tiene acceso a ningún servidor PostgreSQL real (ni `psql`, ni Docker) — así que el camino PostgreSQL está verificado por *diseño y revisión* (17 tests unitarios de la lógica de traducción en `tests/test_db_engine.py`, `mypy --strict` limpio, lectura comparada de cada diferencia de sintaxis contra la documentación oficial) pero **no** por ejecución real contra un servidor PostgreSQL. El camino SQLite, en cambio, sigue estando probado byte a byte por la suite completa (más de 1344 pruebas) ejecutándose sin ningún cambio a través de esta misma capa nueva — es la evidencia de que la abstracción no alteró el comportamiento existente. El camino PostgreSQL es sólido por diseño y por revisión, no por verificación empírica: quien lo active por primera vez contra un PostgreSQL real debería tratarlo como recién estrenado, no como ya probado en producción.
 
-**Lo que NO cambia de motor**: las copias de seguridad (`BackupRepository`, API de backup en caliente exclusiva de `sqlite3.Connection.backup()`) solo están disponibles con SQLite — con `GESTION_EMPLEADOS_DB_URL` definida, `main.py` no las construye (`backups = None`) y la app deshabilita "Copias de seguridad..." en la barra lateral en vez de fingir que la función existe; una instalación con su propio PostgreSQL ya suele tener, a ese nivel, su propia estrategia de copias.
+**Lo que NO cambia de motor**: las copias de seguridad (`BackupRepository`, API de backup en caliente exclusiva de `sqlite3.Connection.backup()`) solo están disponibles con SQLite — con `CONTAAPP_RH_DB_URL` definida, `main.py` no las construye (`backups = None`) y la app deshabilita "Copias de seguridad..." en la barra lateral en vez de fingir que la función existe; una instalación con su propio PostgreSQL ya suele tener, a ese nivel, su propia estrategia de copias.
 
 ## Desarrollo
 
@@ -272,19 +272,19 @@ A partir de ahí, cada `git commit` ejecuta automáticamente mypy --strict, pyfl
 
 ## Compilar como ejecutable (.exe)
 
-El acceso directo del escritorio apunta a un `.exe` independiente (compilado con PyInstaller), no a `pythonw.exe main.py` directamente -- así se abre con doble clic sin depender de que Python siga instalado en esa misma ruta. Para volver a compilarlo tras un cambio (usa el `.spec` ya generado, que recuerda las opciones):
+El acceso directo del escritorio apunta a un `.exe` independiente (compilado con PyInstaller), no a `pythonw.exe main.py` directamente -- así se abre con doble clic sin depender de que Python siga instalado en esa misma ruta. Para volver a compilarlo tras un cambio (usa el `.spec` ya generado, que recuerda las opciones de empaquetado, pero **no** recuerda `--distpath`: es un flag exclusivo de línea de comandos, hay que repetirlo cada vez):
 
 ```
 py -m pip install -r requirements-dev.txt
-py -m PyInstaller "Gestion de Empleados.spec"
+py -m PyInstaller "ContaApp RH.spec" --distpath .
 ```
 
-El `.exe` resultante se genera **en la raíz del proyecto**, junto a `empleados.db` -- a propósito, no en una subcarpeta `dist/`: `app/database.py` calcula `DEFAULT_DB_PATH` junto al propio ejecutable cuando corre compilado (`sys.executable`, no `__file__`, que en una compilación de un solo archivo apunta a una carpeta temporal de autoextracción distinta en cada arranque), así que el `.exe` debe seguir viviendo en la misma carpeta que la base de datos real para encontrarla. Si algún día se mueve el `.exe` a otra carpeta, hay que mover `empleados.db` (y `backups/`) con él.
+El `.exe` resultante se genera **en la raíz del proyecto**, junto a `empleados.db` -- a propósito, no en una subcarpeta `dist/`: `app/database.py` calcula `DEFAULT_DB_PATH` junto al propio ejecutable cuando corre compilado (`sys.executable`, no `__file__`, que en una compilación de un solo archivo apunta a una carpeta temporal de autoextracción distinta en cada arranque), así que el `.exe` debe seguir viviendo en la misma carpeta que la base de datos real para encontrarla. Si algún día se mueve el `.exe` a otra carpeta, hay que mover `empleados.db` (y `backups/`) con él. **Olvidar `--distpath .` es un error real, no solo teórico**: sin él, PyInstaller genera el `.exe` en `dist/` en vez de la raíz, y al abrirlo desde ahí crea una `empleados.db` nueva y vacía en vez de encontrar la real -- pasó exactamente así durante el desarrollo de este mismo proyecto.
 
 Recompilar desde cero (por ejemplo, si se regenera el `.spec` a mano) usa la misma idea:
 
 ```
-py -m PyInstaller --onefile --windowed --name "Gestion de Empleados" --distpath . main.py
+py -m PyInstaller --onefile --windowed --name "ContaApp RH" --distpath . main.py
 ```
 
 Aviso esperable la primera vez que se ejecuta un `.exe` recién compilado (sin firma digital): Windows SmartScreen o el antivirus pueden mostrar un aviso de "editor desconocido" -- es normal en binarios sin firmar, se permite la ejecución y no vuelve a preguntar.

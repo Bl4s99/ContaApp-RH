@@ -745,7 +745,7 @@ DEFAULT_DB_PATH = app_dir() / "empleados.db"
 
 
 def get_connection(db_path: Path | str = DEFAULT_DB_PATH) -> DbConnection:
-    # GESTION_EMPLEADOS_DB_URL activa PostgreSQL en vez de SQLite -- pensado
+    # CONTAAPP_RH_DB_URL activa PostgreSQL en vez de SQLite -- pensado
     # para el modelo de "cada empresa, su propia instalación" (ver README):
     # sin esta variable (el caso por defecto y, en la práctica, casi
     # siempre), el comportamiento es exactamente el de siempre, ni una

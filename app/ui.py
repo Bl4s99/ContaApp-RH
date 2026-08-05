@@ -814,7 +814,7 @@ class MainWindow(tk.Tk):
             current_user.department_id if current_user.role == "encargado" else None
         )
         apply_theme(self, repos.app_settings.get_theme_mode())
-        self.title("Gestión de Empleados")
+        self.title("ContaApp RH")
         self.geometry("1200x680")
         self.minsize(1000, 580)
         center_window(self)
@@ -912,7 +912,7 @@ class MainWindow(tk.Tk):
         sidebar = self._sidebar_scroll.inner
         ttk.Label(
             sidebar,
-            text="Gestión de\nEmpleados",
+            text="ContaApp\nRH",
             style="SidebarTitle.TLabel",
             justify="center",
         ).pack(pady=(0, 16))

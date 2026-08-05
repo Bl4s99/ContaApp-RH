@@ -22,7 +22,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='Gestion de Empleados',
+    name='ContaApp RH',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

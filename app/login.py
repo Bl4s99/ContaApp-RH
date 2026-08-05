@@ -19,7 +19,7 @@ class LoginWindow(tk.Tk):
     def __init__(self, repos: Repositories) -> None:
         super().__init__()
         apply_theme(self, repos.app_settings.get_theme_mode())
-        self.title("Gestión de Empleados — Iniciar sesión")
+        self.title("ContaApp RH — Iniciar sesión")
         self.resizable(False, False)
 
         self._repos = repos
@@ -30,7 +30,7 @@ class LoginWindow(tk.Tk):
 
         ttk.Label(
             frame,
-            text="Gestión de Empleados",
+            text="ContaApp RH",
             style="PageHeading.TLabel",
         ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 4))
         ttk.Label(

@@ -47,7 +47,7 @@ def build_digest_text(alerts: list[Alert]) -> str:
 
 def build_digest_message(connection: EmailConnection, alerts: list[Alert]) -> EmailMessage:
     message = EmailMessage()
-    message["Subject"] = f"Gestión de Empleados — resumen semanal ({len(alerts)} alerta(s))"
+    message["Subject"] = f"ContaApp RH — resumen semanal ({len(alerts)} alerta(s))"
     message["From"] = connection.address
     message["To"] = connection.address
     message.set_content(build_digest_text(alerts))
