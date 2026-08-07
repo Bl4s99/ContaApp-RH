@@ -4157,6 +4157,19 @@ class AppSettingsRepository:
                 "UPDATE app_settings SET company_iban = ? WHERE id = 1", (clean_value,)
             )
 
+    def get_company_nif(self) -> str:
+        row = self._conn.execute("SELECT company_nif FROM app_settings WHERE id = 1").fetchone()
+        if row is None:
+            return ""
+        return str(row["company_nif"])
+
+    def set_company_nif(self, value: str) -> None:
+        clean_value = validation.validate_company_nif(value)
+        with transaction(self._conn):
+            self._conn.execute(
+                "UPDATE app_settings SET company_nif = ? WHERE id = 1", (clean_value,)
+            )
+
 
 @dataclass(frozen=True, slots=True)
 class Repositories:

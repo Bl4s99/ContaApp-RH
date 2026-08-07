@@ -54,6 +54,16 @@ class TestMigrationsAreWiredUp:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(employees)").fetchall()}
         assert "manager_id" in columns
 
+    def test_init_db_backfills_company_nif_on_a_database_created_without_it(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        # Mismo motivo que el test de manager_id de arriba: simula un
+        # empleados.db real escrito antes de que company_nif existiera.
+        conn.execute("ALTER TABLE app_settings DROP COLUMN company_nif")
+        init_db(conn)
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(app_settings)").fetchall()}
+        assert "company_nif" in columns
+
     def test_init_db_is_idempotent_on_an_already_migrated_database(
         self, conn: sqlite3.Connection
     ) -> None:

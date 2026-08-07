@@ -3183,22 +3183,22 @@ class TestUserRepository:
         self, conn: sqlite3.Connection
     ) -> None:
         repo = UserRepository(conn)
-        created = repo.create("admin", "admin")
+        created = repo.create("admin", "admin1234")
         assert created.id is not None
         assert created.username == "admin"
-        authenticated = repo.authenticate("admin", "admin")
+        authenticated = repo.authenticate("admin", "admin1234")
         assert authenticated is not None
         assert authenticated.id == created.id
 
     def test_authenticate_rejects_wrong_password(self, conn: sqlite3.Connection) -> None:
         repo = UserRepository(conn)
-        repo.create("admin", "admin")
+        repo.create("admin", "admin1234")
         assert repo.authenticate("admin", "wrong-password") is None
 
     def test_authenticate_rejects_unknown_username(self, conn: sqlite3.Connection) -> None:
         repo = UserRepository(conn)
-        repo.create("admin", "admin")
-        assert repo.authenticate("nobody", "admin") is None
+        repo.create("admin", "admin1234")
+        assert repo.authenticate("nobody", "admin1234") is None
 
     def test_authenticate_username_is_case_insensitive(self, conn: sqlite3.Connection) -> None:
         repo = UserRepository(conn)
@@ -3212,12 +3212,12 @@ class TestUserRepository:
         assert repo.authenticate("admin", "secret123") is None
 
     def test_password_never_stored_in_plaintext(self, conn: sqlite3.Connection) -> None:
-        UserRepository(conn).create("admin", "admin")
+        UserRepository(conn).create("admin", "admin1234")
         row = conn.execute(
             "SELECT password_hash, salt FROM users WHERE username = 'admin'"
         ).fetchone()
-        assert row["password_hash"] != "admin"
-        assert "admin" not in row["password_hash"]
+        assert row["password_hash"] != "admin1234"
+        assert "admin1234" not in row["password_hash"]
         # hex-encoded SHA-256 digest -> 64 hex chars; salt is 16 bytes -> 32 hex chars.
         assert len(row["password_hash"]) == 64
         assert len(row["salt"]) == 32
@@ -3638,6 +3638,18 @@ class TestAppSettingsRepository:
     def test_set_company_iban_rejects_invalid_checksum(self, conn: sqlite3.Connection) -> None:
         with pytest.raises(validation.ValidationError):
             AppSettingsRepository(conn).set_company_iban("ES0021000418450200051332")
+
+    def test_get_company_nif_defaults_to_empty(self, conn: sqlite3.Connection) -> None:
+        assert AppSettingsRepository(conn).get_company_nif() == ""
+
+    def test_set_company_nif_persists(self, conn: sqlite3.Connection) -> None:
+        repo = AppSettingsRepository(conn)
+        repo.set_company_nif("B23456718")
+        assert repo.get_company_nif() == "B23456718"
+
+    def test_set_company_nif_rejects_invalid_format(self, conn: sqlite3.Connection) -> None:
+        with pytest.raises(validation.ValidationError):
+            AppSettingsRepository(conn).set_company_nif("no-es-un-nif")
 
 
 class TestCollectiveAgreementRepository:

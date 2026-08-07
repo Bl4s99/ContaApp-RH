@@ -24,6 +24,7 @@ from app.logging_config import (
     log_uncaught_exception,
 )
 from app.repository import Repositories
+from app.setup_wizard import SetupWizard
 from app.ui import MainWindow
 
 DEFAULT_DAY_TYPES = [
@@ -99,7 +100,11 @@ def main() -> None:
             for name in DEFAULT_ONBOARDING_TASKS:
                 repos.onboarding_tasks.create(name)
         if not repos.users.list_all():
-            repos.users.create("admin", "admin")
+            wizard = SetupWizard(repos)
+            wizard.mainloop()
+            if not wizard.completed:
+                logger.info("Asistente de configuración inicial cerrado sin completar")
+                return
 
         backup_error: str | None = None
         if backups is not None and not backups.has_backup_today():

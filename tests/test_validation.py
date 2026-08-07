@@ -425,7 +425,7 @@ class TestUsername:
     def test_strips_whitespace(self) -> None:
         assert validation.validate_username("  admin  ") == "admin"
 
-    def test_accepts_the_seeded_admin_username(self) -> None:
+    def test_accepts_a_short_common_username(self) -> None:
         assert validation.validate_username("admin") == "admin"
 
     def test_rejects_too_short(self) -> None:
@@ -442,8 +442,11 @@ class TestUsername:
 
 
 class TestPassword:
-    def test_accepts_the_seeded_admin_password(self) -> None:
-        assert validation.validate_password("admin") == "admin"
+    def test_rejects_the_old_seeded_admin_password(self) -> None:
+        # El asistente de primer arranque (app/setup_wizard.py) sustituyó a
+        # la semilla "admin"/"admin" -- esa contraseña ya no debe aceptarse.
+        with pytest.raises(validation.ValidationError):
+            validation.validate_password("admin")
 
     def test_rejects_too_short(self) -> None:
         with pytest.raises(validation.ValidationError):
@@ -575,6 +578,64 @@ class TestDniNie:
     def test_rejects_invalid_nie_prefix(self) -> None:
         with pytest.raises(validation.ValidationError):
             validation.validate_dni_nie("A1234567L")
+
+
+class TestCif:
+    # Dígitos de control calculados hacia adelante con el propio algoritmo
+    # (suma de posiciones pares + posiciones impares dobladas y reducidas),
+    # no copiados de una lista de CIFs "conocidos" -- más fiable para
+    # comprobar que el algoritmo es internamente consistente.
+    def test_empty_is_allowed(self) -> None:
+        assert validation.validate_cif("") == ""
+        assert validation.validate_cif("   ") == ""
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "B23456718",  # letra que exige dígito de control
+            "N3456712C",  # letra que exige letra de control
+            "C45671237",  # letra que acepta ambas formas -- forma dígito
+            "C4567123G",  # letra que acepta ambas formas -- forma letra
+        ],
+    )
+    def test_accepts_valid_cif(self, value: str) -> None:
+        assert validation.validate_cif(value) == value
+
+    def test_lowercase_is_normalized_to_uppercase(self) -> None:
+        assert validation.validate_cif("b23456718") == "B23456718"
+
+    def test_rejects_letter_form_when_digit_required(self) -> None:
+        # "B" exige dígito de control -- la letra correspondiente no vale.
+        with pytest.raises(validation.ValidationError):
+            validation.validate_cif("B2345671H")
+
+    def test_rejects_digit_form_when_letter_required(self) -> None:
+        # "N" exige letra de control -- el dígito correspondiente no vale.
+        with pytest.raises(validation.ValidationError):
+            validation.validate_cif("N34567123")
+
+    def test_rejects_unknown_organization_letter(self) -> None:
+        with pytest.raises(validation.ValidationError):
+            validation.validate_cif("K23456718")
+
+    def test_rejects_wrong_length(self) -> None:
+        with pytest.raises(validation.ValidationError):
+            validation.validate_cif("B234567")
+
+
+class TestCompanyNif:
+    def test_empty_is_allowed(self) -> None:
+        assert validation.validate_company_nif("") == ""
+
+    def test_accepts_valid_dni(self) -> None:
+        assert validation.validate_company_nif("12345678Z") == "12345678Z"
+
+    def test_accepts_valid_cif(self) -> None:
+        assert validation.validate_company_nif("B23456718") == "B23456718"
+
+    def test_rejects_garbage_matching_neither_format(self) -> None:
+        with pytest.raises(validation.ValidationError):
+            validation.validate_company_nif("no-es-un-nif")
 
 
 class TestSsNumber:

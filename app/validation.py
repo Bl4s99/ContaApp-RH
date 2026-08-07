@@ -20,10 +20,10 @@ MAX_PERCENTAGE = 100.0
 VALID_WEEKDAYS = frozenset(range(1, 8))  # ISO weekdays: 1=lunes .. 7=domingo
 MIN_USERNAME_LENGTH = 3
 MAX_USERNAME_LENGTH = 40
-# Deliberately low: this app has no internet-facing login, one seeded local
-# account ("admin"/"admin") is an explicit, known-weak starting point the
-# user asked for. A stricter minimum here would reject that seed outright.
-MIN_PASSWORD_LENGTH = 4
+# El asistente de primer arranque (app/setup_wizard.py) es ahora quien crea
+# el primer usuario admin, con una contraseña elegida por la propia empresa
+# -- ya no hace falta aceptar la antigua semilla débil "admin"/"admin".
+MIN_PASSWORD_LENGTH = 8
 
 
 class ValidationError(Exception):
@@ -224,6 +224,62 @@ def validate_dni_nie(value: str) -> str:
             "dni_nie", "la letra no coincide con el número (dígito de control incorrecto)"
         )
     return stripped
+
+
+_CIF_RE = re.compile(r"^([ABCDEFGHJNPQRSUVW])(\d{7})([0-9A-J])$")
+_CIF_LETTER_CONTROL = "JABCDEFGHI"
+# N/P/Q/R/S/W exigen letra de control; A/B/E/H exigen dígito; el resto
+# (C/D/F/G/I/J/U/V) acepta las dos formas -- simplificación pragmática y
+# deliberada: aceptar de más es preferible a rechazar un CIF real.
+_CIF_REQUIRES_LETTER = frozenset("NPQRSW")
+_CIF_REQUIRES_DIGIT = frozenset("ABEH")
+
+
+def validate_cif(value: str) -> str:
+    stripped = value.strip().upper().replace(" ", "")
+    if not stripped:
+        return ""
+    match = _CIF_RE.match(stripped)
+    if not match:
+        raise ValidationError("nif_cif", "formato de CIF inválido, ej. B12345674")
+    org_letter, digits, control_char = match.groups()
+    even_sum = sum(int(d) for d in digits[1::2])
+    odd_sum = 0
+    for d in digits[0::2]:
+        doubled = int(d) * 2
+        odd_sum += doubled - 9 if doubled >= 10 else doubled
+    control_digit = (10 - (even_sum + odd_sum) % 10) % 10
+    expected_letter = _CIF_LETTER_CONTROL[control_digit]
+    expected_digit = str(control_digit)
+    if org_letter in _CIF_REQUIRES_LETTER:
+        valid = control_char == expected_letter
+    elif org_letter in _CIF_REQUIRES_DIGIT:
+        valid = control_char == expected_digit
+    else:
+        valid = control_char in (expected_letter, expected_digit)
+    if not valid:
+        raise ValidationError("nif_cif", "el CIF no es válido (dígito de control incorrecto)")
+    return stripped
+
+
+def validate_company_nif(value: str) -> str:
+    """Acepta DNI/NIE (autónomo dado de alta con su propio documento) o CIF
+    (sociedad) -- el asistente de primer arranque no sabe de antemano cuál
+    de los dos va a introducir la empresa."""
+    stripped = value.strip()
+    if not stripped:
+        return ""
+    try:
+        return validate_dni_nie(value)
+    except ValidationError:
+        pass
+    try:
+        return validate_cif(value)
+    except ValidationError:
+        raise ValidationError(
+            "nif_cif",
+            "formato de NIF/CIF inválido, use DNI (12345678Z), NIE (X1234567L) o CIF (B12345674)",
+        ) from None
 
 
 _SS_NUMBER_RE = re.compile(r"^\d{12}$")

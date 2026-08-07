@@ -141,32 +141,37 @@ class SepaExportDialog(tk.Toplevel):
         ttk.Entry(frame, textvariable=self.company_iban_var, width=36).grid(
             row=2, column=1, sticky="w", pady=3
         )
+        ttk.Label(frame, text="NIF / CIF").grid(row=3, column=0, sticky="w", pady=3)
+        self.company_nif_var = tk.StringVar(value=repos.app_settings.get_company_nif())
+        ttk.Entry(frame, textvariable=self.company_nif_var, width=36).grid(
+            row=3, column=1, sticky="w", pady=3
+        )
         ttk.Button(
             frame, text="Guardar datos de la empresa", command=self._handle_save_company
-        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(2, 0))
+        ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(2, 0))
         self.company_error_label = ttk.Label(frame, text="", style="Error.TLabel", wraplength=420)
-        self.company_error_label.grid(row=4, column=0, columnspan=2, sticky="w", pady=(2, 0))
+        self.company_error_label.grid(row=5, column=0, columnspan=2, sticky="w", pady=(2, 0))
 
         ttk.Separator(frame, orient="horizontal").grid(
-            row=5, column=0, columnspan=2, sticky="ew", pady=12
+            row=6, column=0, columnspan=2, sticky="ew", pady=12
         )
 
         ttk.Label(frame, text="Fecha de ejecución solicitada").grid(
-            row=6, column=0, sticky="w", pady=3
+            row=7, column=0, sticky="w", pady=3
         )
         self.execution_date = DateEntry(
             frame, initial=date.today() + timedelta(days=1), min_date=date.today()
         )
-        self.execution_date.grid(row=6, column=1, sticky="w", pady=3)
+        self.execution_date.grid(row=7, column=1, sticky="w", pady=3)
 
         ttk.Label(
             frame,
             text=f"Nóminas generadas de {MONTH_NAMES[month - 1]} {year}",
             style="PageHeading.TLabel",
-        ).grid(row=7, column=0, columnspan=2, sticky="w", pady=(12, 4))
+        ).grid(row=8, column=0, columnspan=2, sticky="w", pady=(12, 4))
 
         tree_frame = ttk.Frame(frame)
-        tree_frame.grid(row=8, column=0, columnspan=2, sticky="nsew")
+        tree_frame.grid(row=9, column=0, columnspan=2, sticky="nsew")
         self.tree = ttk.Treeview(
             tree_frame, columns=("empleado", "iban", "importe"), show="headings", height=8
         )
@@ -184,10 +189,10 @@ class SepaExportDialog(tk.Toplevel):
         self.summary_label = ttk.Label(
             frame, text="", style="Muted.TLabel", wraplength=480, justify="left"
         )
-        self.summary_label.grid(row=9, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        self.summary_label.grid(row=10, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
         button_row = ttk.Frame(frame)
-        button_row.grid(row=10, column=0, columnspan=2, pady=(12, 0))
+        button_row.grid(row=11, column=0, columnspan=2, pady=(12, 0))
         self.export_button = ttk.Button(
             button_row,
             text="Generar fichero SEPA...",
@@ -197,7 +202,7 @@ class SepaExportDialog(tk.Toplevel):
         self.export_button.pack(side="left", padx=(0, 6))
         ttk.Button(button_row, text="Cerrar", command=self.destroy).pack(side="left")
         self.export_error_label = ttk.Label(frame, text="", style="Error.TLabel", wraplength=480)
-        self.export_error_label.grid(row=11, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        self.export_error_label.grid(row=12, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
         self.bind("<Escape>", lambda _e: self.destroy())
         self.protocol("WM_DELETE_WINDOW", self.destroy)
@@ -250,12 +255,14 @@ class SepaExportDialog(tk.Toplevel):
         try:
             self._repos.app_settings.set_company_name(self.company_name_var.get())
             self._repos.app_settings.set_company_iban(self.company_iban_var.get())
+            self._repos.app_settings.set_company_nif(self.company_nif_var.get())
         except validation.ValidationError as exc:
             self.company_error_label.configure(text=str(exc))
             return
         self.company_error_label.configure(text="")
         self.company_name_var.set(self._repos.app_settings.get_company_name())
         self.company_iban_var.set(self._repos.app_settings.get_company_iban())
+        self.company_nif_var.set(self._repos.app_settings.get_company_nif())
 
     def _handle_export(self) -> None:
         if not self._payments:

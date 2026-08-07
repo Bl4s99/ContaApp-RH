@@ -23,7 +23,7 @@ py -m pip install -r requirements.txt
 py main.py
 ```
 
-Los datos se guardan en `empleados.db` (SQLite), en la misma carpeta del proyecto. Se crea automáticamente la primera vez, junto con un departamento "General", un catálogo inicial de tipos de día (Vacaciones, Enfermedad, Festivo, Permiso o licencia, Ausencia injustificada), un catálogo inicial de tareas de incorporación (Contrato firmado, Alta en Seguridad Social, Equipo entregado, Accesos creados) y un usuario **admin / admin** (rol administrador) para poder entrar la primera vez — cámbialo cuanto antes si esta base de datos va a contener información real (ver "Inicio de sesión y usuarios" más abajo).
+Los datos se guardan en `empleados.db` (SQLite), en la misma carpeta del proyecto. Se crea automáticamente la primera vez, junto con un departamento "General", un catálogo inicial de tipos de día (Vacaciones, Enfermedad, Festivo, Permiso o licencia, Ausencia injustificada) y un catálogo inicial de tareas de incorporación (Contrato firmado, Alta en Seguridad Social, Equipo entregado, Accesos creados). La primera vez que se ejecuta la app (mientras no haya ningún usuario todavía) aparece un asistente de configuración inicial que pide el nombre y NIF/CIF de la empresa y crea la primera cuenta de administrador con el usuario y contraseña que elijas — no hay ninguna credencial por defecto (ver "Inicio de sesión y usuarios" más abajo).
 
 ## Datos de prueba
 
@@ -36,7 +36,7 @@ Genera `empleados_ficticios.csv` (50 empleados ficticios, editable) y carga ese 
 ## Funcionalidades
 
 **Inicio de sesión y usuarios**
-- Antes de llegar a la aplicación hay que iniciar sesión con usuario y contraseña. Se crea automáticamente un usuario **admin** con contraseña **admin** la primera vez que se ejecuta la app (ver arriba).
+- Antes de llegar a la aplicación hay que iniciar sesión con usuario y contraseña. La primera cuenta de administrador se crea desde el asistente de configuración inicial que aparece la primera vez que se ejecuta la app, con las credenciales que elija quien lo complete (ver arriba) — no hay ningún usuario por defecto.
 - Las contraseñas se guardan con hash (PBKDF2-HMAC-SHA256, 260.000 iteraciones) y una sal aleatoria distinta por usuario — nunca en texto plano, y verificado con pruebas automatizadas que comprueban directamente la fila de la base de datos.
 - **Dos roles**: **administrador** (ve y gestiona todo, sin restricciones) y **encargado de departamento** (asignado a un único departamento al crearlo). Un encargado queda limitado a ese departamento en Lista de empleados (incluida el alta de nuevos empleados, que solo puede asignarlos a su propio departamento), Nóminas, Fichajes, Solicitudes de ausencia y el calendario laboral — no ve datos de otros departamentos en ninguna de esas pantallas. Además no ve "Departamentos" ni "Gestionar usuarios..." en la barra lateral, y los botones "Configurar % Seguridad Social..." y "Configurar días de vacaciones..." (ajustes que afectan a toda la empresa) quedan deshabilitados en su sesión.
 - **Gestión de usuarios** (solo visible para administradores, "Gestionar usuarios..." en la barra lateral): alta de nuevos usuarios (usuario, contraseña, rol y, si es encargado, su departamento) y baja de usuarios existentes. No se puede eliminar el usuario con el que se ha iniciado sesión, ni el último administrador que quede en el sistema (evita quedarse sin forma de gestionar la app). Todavía no hay edición de usuarios existentes ni cambio de contraseña desde la interfaz — habría que pedirlo si hace falta.

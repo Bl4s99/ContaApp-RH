@@ -188,7 +188,8 @@ CREATE TABLE IF NOT EXISTS app_settings (
     annual_vacation_days REAL NOT NULL DEFAULT 22 CHECK(annual_vacation_days >= 0),
     data_retention_years INTEGER NOT NULL DEFAULT 4 CHECK(data_retention_years >= 0),
     company_name TEXT NOT NULL DEFAULT '',
-    company_iban TEXT NOT NULL DEFAULT ''
+    company_iban TEXT NOT NULL DEFAULT '',
+    company_nif TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS employee_documents (
@@ -583,7 +584,8 @@ CREATE TABLE IF NOT EXISTS app_settings (
     annual_vacation_days DOUBLE PRECISION NOT NULL DEFAULT 22 CHECK(annual_vacation_days >= 0),
     data_retention_years INTEGER NOT NULL DEFAULT 4 CHECK(data_retention_years >= 0),
     company_name TEXT NOT NULL DEFAULT '',
-    company_iban TEXT NOT NULL DEFAULT ''
+    company_iban TEXT NOT NULL DEFAULT '',
+    company_nif TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS employee_documents (
@@ -828,6 +830,7 @@ def init_db(conn: DbConnection) -> None:
     _migrate_day_types_is_vacation(conn)
     _migrate_app_settings_vacation_days(conn)
     _migrate_app_settings_company_identity(conn)
+    _migrate_app_settings_company_nif(conn)
     _migrate_employee_absences_status(conn)
     _migrate_users_role_and_department(conn)
     _migrate_users_email_digest(conn)
@@ -967,6 +970,16 @@ def _migrate_app_settings_company_identity(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE app_settings ADD COLUMN company_name TEXT NOT NULL DEFAULT ''")
     if "company_iban" not in columns:
         conn.execute("ALTER TABLE app_settings ADD COLUMN company_iban TEXT NOT NULL DEFAULT ''")
+
+
+def _migrate_app_settings_company_nif(conn: sqlite3.Connection) -> None:
+    """NIF/CIF de la propia empresa, recogido por el asistente de primer
+    arranque (app/setup_wizard.py) -- añadido después de company_name/
+    company_iban, de ahí una migración separada en vez de ampliar
+    _migrate_app_settings_company_identity."""
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(app_settings)").fetchall()}
+    if "company_nif" not in columns:
+        conn.execute("ALTER TABLE app_settings ADD COLUMN company_nif TEXT NOT NULL DEFAULT ''")
 
 
 def _migrate_employee_absences_status(conn: sqlite3.Connection) -> None:
