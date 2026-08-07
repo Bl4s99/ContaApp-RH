@@ -5,8 +5,11 @@ import sqlite3
 import threading
 from pathlib import Path
 
+import pytest
+
 from app import database
 from app.database import get_connection, init_db
+from app.db_engine import DB_URL_ENV_VAR, write_configured_db_url
 
 # conn fixture is function-scoped in tests/conftest.py.
 
@@ -79,6 +82,55 @@ class TestMigrationsAreWiredUp:
             assert "manager_id" in columns
         finally:
             conn.close()
+
+
+class TestGetConnectionPrecedence:
+    """El fichero de configuración (elegido desde DatabaseSettingsDialog,
+    ver app/ui.py) debe ganar siempre a CONTAAPP_RH_DB_URL, incluida una
+    elección explícita de "Local" (db_url vacío) frente a una variable de
+    entorno residual con un valor distinto -- ver el docstring de
+    read_configured_db_url en app/db_engine.py, y el bug real que este
+    mismo caso destapó durante la verificación en vivo de este cambio."""
+
+    def test_no_config_file_and_no_env_var_uses_plain_sqlite(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(database, "app_dir", lambda: tmp_path)
+        monkeypatch.delenv(DB_URL_ENV_VAR, raising=False)
+        conn = get_connection(tmp_path / "test.db")
+        try:
+            assert isinstance(conn, sqlite3.Connection)
+        finally:
+            conn.close()
+
+    def test_env_var_alone_is_still_honored_when_no_config_file_exists(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(database, "app_dir", lambda: tmp_path)
+        monkeypatch.setenv(DB_URL_ENV_VAR, "postgresql://user:pass@localhost:1/nope")
+        with pytest.raises(Exception):
+            get_connection(tmp_path / "test.db")
+
+    def test_explicit_local_config_file_overrides_a_stale_env_var(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(database, "app_dir", lambda: tmp_path)
+        monkeypatch.setenv(DB_URL_ENV_VAR, "postgresql://user:pass@localhost:1/nope")
+        write_configured_db_url(tmp_path, "")
+        conn = get_connection(tmp_path / "test.db")
+        try:
+            assert isinstance(conn, sqlite3.Connection)
+        finally:
+            conn.close()
+
+    def test_config_file_postgres_url_is_used_over_a_different_env_var(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(database, "app_dir", lambda: tmp_path)
+        monkeypatch.setenv(DB_URL_ENV_VAR, "postgresql://user:pass@localhost:2/alsonope")
+        write_configured_db_url(tmp_path, "postgresql://user:pass@localhost:1/nope")
+        with pytest.raises(Exception):
+            get_connection(tmp_path / "test.db")
 
 
 class TestConcurrentWrites:

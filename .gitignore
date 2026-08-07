@@ -7,6 +7,10 @@ backups/
 logs/
 empleados_ficticios.csv
 
+# Contiene la contraseña de PostgreSQL en texto plano si se ha configurado
+# un servidor propio desde "Base de datos..." -- ver app/db_engine.py.
+db_config.json
+
 # Binario compilado (PyInstaller) -- se reconstruye desde el .spec versionado,
 # no tiene sentido versionar un binario de ~20 MB.
 *.exe

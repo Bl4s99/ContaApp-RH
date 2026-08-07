@@ -6,7 +6,13 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-from app.db_engine import DB_URL_ENV_VAR, DbConnection, PostgresConnection, is_postgres_url
+from app.db_engine import (
+    DB_URL_ENV_VAR,
+    DbConnection,
+    PostgresConnection,
+    is_postgres_url,
+    read_configured_db_url,
+)
 from app.paths import app_dir
 
 SCHEMA_TABLES = """
@@ -747,18 +753,25 @@ DEFAULT_DB_PATH = app_dir() / "empleados.db"
 
 
 def get_connection(db_path: Path | str = DEFAULT_DB_PATH) -> DbConnection:
-    # CONTAAPP_RH_DB_URL activa PostgreSQL en vez de SQLite -- pensado
-    # para el modelo de "cada empresa, su propia instalación" (ver README):
-    # sin esta variable (el caso por defecto y, en la práctica, casi
+    # Activa PostgreSQL en vez de SQLite -- pensado para el modelo de "cada
+    # empresa, su propia instalación" (ver README). Sin ninguna de las dos
+    # fuentes de abajo (el caso por defecto y, en la práctica, casi
     # siempre), el comportamiento es exactamente el de siempre, ni una
     # línea nueva se ejecuta de este bloque. `db_path` se ignora en el
     # camino PostgreSQL a propósito: no tiene sentido para una URL de red.
-    db_url = os.environ.get(DB_URL_ENV_VAR, "")
+    # El fichero de configuración (elegido desde DatabaseSettingsDialog, ver
+    # app/ui.py) tiene prioridad sobre la variable de entorno, que sigue
+    # funcionando igual que antes para quien prefiera no pasar por la
+    # interfaz.
+    configured_db_url = read_configured_db_url(app_dir())
+    db_url = configured_db_url if configured_db_url is not None else os.environ.get(
+        DB_URL_ENV_VAR, ""
+    )
     if db_url:
         if not is_postgres_url(db_url):
             raise ValueError(
-                f"{DB_URL_ENV_VAR} solo admite URLs postgresql://; para usar "
-                "SQLite (el valor por defecto) no definas esta variable."
+                "La base de datos configurada solo admite URLs postgresql://; "
+                "para usar SQLite (el valor por defecto) deja ese ajuste vacío."
             )
         from app.db_engine import create_postgres_connection
 

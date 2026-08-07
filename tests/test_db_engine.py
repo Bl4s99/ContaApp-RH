@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
+
 from app.db_engine import (
     _split_sql_statements,
     _translate_qmark_params,
+    check_db_connection,
     is_postgres_url,
+    read_configured_db_url,
+    write_configured_db_url,
 )
 
 
@@ -99,3 +106,60 @@ class TestSplitSqlStatements:
         assert _split_sql_statements("CREATE TABLE a (id INTEGER)") == [
             "CREATE TABLE a (id INTEGER)"
         ]
+
+
+class TestReadConfiguredDbUrl:
+    # None significa "sin opinión" (cae a la variable de entorno en
+    # database.get_connection()); "" significa "el fichero existe y elige
+    # explícitamente lo local" -- ver el docstring de la función. No
+    # confundir ambos casos, es la distinción que evita que una elección
+    # explícita de "Local" pierda contra una variable de entorno residual.
+    def test_missing_file_returns_none(self, tmp_path: Path) -> None:
+        assert read_configured_db_url(tmp_path) is None
+
+    def test_corrupt_json_returns_none(self, tmp_path: Path) -> None:
+        (tmp_path / "db_config.json").write_text("{not valid json", encoding="utf-8")
+        assert read_configured_db_url(tmp_path) is None
+
+    def test_non_dict_json_returns_none(self, tmp_path: Path) -> None:
+        (tmp_path / "db_config.json").write_text("[1, 2, 3]", encoding="utf-8")
+        assert read_configured_db_url(tmp_path) is None
+
+    def test_null_db_url_returns_none(self, tmp_path: Path) -> None:
+        (tmp_path / "db_config.json").write_text('{"db_url": null}', encoding="utf-8")
+        assert read_configured_db_url(tmp_path) is None
+
+    def test_missing_db_url_key_returns_none(self, tmp_path: Path) -> None:
+        (tmp_path / "db_config.json").write_text("{}", encoding="utf-8")
+        assert read_configured_db_url(tmp_path) is None
+
+    def test_explicit_empty_string_is_returned_as_is(self, tmp_path: Path) -> None:
+        (tmp_path / "db_config.json").write_text('{"db_url": ""}', encoding="utf-8")
+        assert read_configured_db_url(tmp_path) == ""
+
+    def test_postgres_url_is_returned(self, tmp_path: Path) -> None:
+        (tmp_path / "db_config.json").write_text(
+            '{"db_url": "postgresql://user:pass@host/db"}', encoding="utf-8"
+        )
+        assert read_configured_db_url(tmp_path) == "postgresql://user:pass@host/db"
+
+
+class TestWriteConfiguredDbUrl:
+    def test_round_trips_a_postgres_url(self, tmp_path: Path) -> None:
+        write_configured_db_url(tmp_path, "postgresql://user:pass@host/db")
+        assert read_configured_db_url(tmp_path) == "postgresql://user:pass@host/db"
+
+    def test_round_trips_an_explicit_empty_string(self, tmp_path: Path) -> None:
+        write_configured_db_url(tmp_path, "postgresql://user:pass@host/db")
+        write_configured_db_url(tmp_path, "")
+        assert read_configured_db_url(tmp_path) == ""
+
+
+class TestCheckDbConnection:
+    def test_raises_against_an_unreachable_server(self) -> None:
+        # Sin servidor PostgreSQL real disponible en este entorno de
+        # desarrollo (ver docstring del módulo) -- el camino de éxito no se
+        # puede verificar aquí, solo que un fallo real se propaga y no se
+        # traga en silencio.
+        with pytest.raises(Exception):
+            check_db_connection("postgresql://user:pass@localhost:1/nonexistent")

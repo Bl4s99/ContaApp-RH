@@ -29,7 +29,9 @@ vez en un PostgreSQL real debería tratarlo como recién estrenado, no como
 ya probado en producción."""
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, Union, runtime_checkable
 
 if TYPE_CHECKING:
@@ -38,6 +40,11 @@ if TYPE_CHECKING:
     import sqlalchemy
 
 DB_URL_ENV_VAR = "CONTAAPP_RH_DB_URL"
+# Fichero junto al .exe (misma carpeta que resuelve app.paths.app_dir(), ver
+# database.DEFAULT_DB_PATH/logging_config.LOG_DIR) para que "qué base de
+# datos usar" se pueda elegir desde la propia app (ver app/ui.py,
+# DatabaseSettingsDialog) sin tocar variables de entorno de Windows a mano.
+DB_CONFIG_FILENAME = "db_config.json"
 
 
 @runtime_checkable
@@ -67,6 +74,44 @@ class DbConnection(Protocol):
 
 def is_postgres_url(url: str) -> bool:
     return url.startswith("postgresql://") or url.startswith("postgres://")
+
+
+def read_configured_db_url(directory: Path) -> str | None:
+    """None significa "sin opinión" (fichero ausente, corrupto, o con un
+    valor inesperado como "db_url": null) -- database.get_connection() debe
+    caer a la variable de entorno en ese caso, nunca impedir el arranque.
+    "" (cadena vacía) es distinto: significa que el fichero SÍ existe y
+    contiene una elección explícita de "usa el SQLite local", que debe
+    prevalecer sobre una variable de entorno que pueda haber quedado puesta
+    de antes -- ver DatabaseSettingsDialog, que escribe "" exactamente para
+    volver a local. Confundir ambos casos bajo un único "" fue un bug real
+    encontrado en la verificación en vivo de este mismo cambio: la elección
+    explícita de "Local" desde la interfaz no ganaba a una variable de
+    entorno residual."""
+    try:
+        raw = (directory / DB_CONFIG_FILENAME).read_text(encoding="utf-8")
+        data = json.loads(raw)
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    value = data.get("db_url")
+    return value if isinstance(value, str) else None
+
+
+def write_configured_db_url(directory: Path, db_url: str) -> None:
+    """Una cadena vacía significa "usa el SQLite local por defecto"."""
+    path = directory / DB_CONFIG_FILENAME
+    path.write_text(json.dumps({"db_url": db_url}, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def check_db_connection(url: str) -> None:
+    """Abre y cierra inmediatamente -- deja que cualquier excepción se
+    propague tal cual, para que quien llama (DatabaseSettingsDialog) la
+    muestre al usuario. No se llama test_db_connection a propósito: los
+    tests de este módulo importan funciones por nombre, y pytest recolecta
+    cualquier test_* como caso de prueba aunque solo esté importado."""
+    create_postgres_connection(url).close()
 
 
 def _translate_qmark_params(

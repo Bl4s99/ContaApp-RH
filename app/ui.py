@@ -7,6 +7,7 @@ from collections.abc import Callable
 from functools import partial
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
+from urllib.parse import quote, urlsplit
 
 from app import theme, validation
 from app.absence_requests_ui import AbsenceRequestsPage
@@ -17,6 +18,7 @@ from app.calendar_widget import ScrollableFrame, ToggleSwitch
 from app.candidates_ui import CandidatesPage
 from app.collective_agreement_ui import CollectiveAgreementManagerDialog
 from app.cost_report_ui import CostReportPage
+from app.db_engine import check_db_connection, read_configured_db_url, write_configured_db_url
 from app.document_template_ui import DocumentTemplateManagerDialog
 from app.employee_page import EmployeePage
 from app.export import export_employees_csv
@@ -33,6 +35,7 @@ from app.repository import (
     Repositories,
     RepositoryError,
 )
+from app.paths import app_dir
 from app.schedule_ui import DayTypeManagerDialog, HolidayTemplateManagerDialog
 from app.theme import apply_theme
 from app.time_clock_ui import TimeClockPage
@@ -703,6 +706,181 @@ class BackupManagerDialog(tk.Toplevel):
         os.startfile(self._backups.backups_dir)
 
 
+class DatabaseSettingsDialog(tk.Toplevel):
+    """Elegir SQLite local (por defecto) o un PostgreSQL propio sin tocar
+    ninguna variable de entorno de Windows a mano -- ver
+    app/db_engine.py:read_configured_db_url/write_configured_db_url. Solo
+    escribe el fichero de configuración; get_connection() se llama una
+    única vez al arrancar main.py y los repositorios guardan una referencia
+    directa a esa conexión, así que el cambio no tiene efecto hasta
+    reiniciar la aplicación -- este diálogo no intenta reconectar en
+    caliente ni reiniciar el proceso él mismo."""
+
+    def __init__(self, parent: TkParent, repos: Repositories) -> None:
+        super().__init__(parent)
+        self.title("Base de datos")
+        self.resizable(False, False)
+        self.transient(parent)
+        self.grab_set()
+
+        self._repos = repos
+        self._tested_ok = False
+
+        frame = ttk.Frame(self, padding=12)
+        frame.grid(row=0, column=0, sticky="nsew")
+
+        ttk.Label(frame, text="Base de datos", style="PageHeading.TLabel").grid(
+            row=0, column=0, columnspan=2, sticky="w", pady=(0, 6)
+        )
+        ttk.Label(
+            frame, text=self._describe_current_source(), style="Muted.TLabel", wraplength=380
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, 10))
+
+        configured = read_configured_db_url(app_dir())
+        self.mode_var = tk.StringVar(value="postgres" if configured else "local")
+        ttk.Radiobutton(
+            frame,
+            text="Local (SQLite), en este equipo",
+            variable=self.mode_var,
+            value="local",
+            command=self._handle_mode_change,
+        ).grid(row=2, column=0, columnspan=2, sticky="w", pady=2)
+        ttk.Radiobutton(
+            frame,
+            text="Servidor PostgreSQL propio",
+            variable=self.mode_var,
+            value="postgres",
+            command=self._handle_mode_change,
+        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=2)
+
+        self.postgres_frame = ttk.Frame(frame)
+        self.postgres_frame.grid(row=4, column=0, columnspan=2, sticky="w", pady=(6, 0), padx=(20, 0))
+        ttk.Label(self.postgres_frame, text="Host").grid(row=0, column=0, sticky="w", pady=2)
+        self.host_var = tk.StringVar()
+        ttk.Entry(self.postgres_frame, textvariable=self.host_var, width=28).grid(
+            row=0, column=1, sticky="w", pady=2, padx=(8, 0)
+        )
+        ttk.Label(self.postgres_frame, text="Puerto").grid(row=1, column=0, sticky="w", pady=2)
+        self.port_var = tk.StringVar(value="5432")
+        ttk.Entry(self.postgres_frame, textvariable=self.port_var, width=28).grid(
+            row=1, column=1, sticky="w", pady=2, padx=(8, 0)
+        )
+        ttk.Label(self.postgres_frame, text="Nombre de la base de datos").grid(
+            row=2, column=0, sticky="w", pady=2
+        )
+        self.dbname_var = tk.StringVar()
+        ttk.Entry(self.postgres_frame, textvariable=self.dbname_var, width=28).grid(
+            row=2, column=1, sticky="w", pady=2, padx=(8, 0)
+        )
+        ttk.Label(self.postgres_frame, text="Usuario").grid(row=3, column=0, sticky="w", pady=2)
+        self.pg_username_var = tk.StringVar()
+        ttk.Entry(self.postgres_frame, textvariable=self.pg_username_var, width=28).grid(
+            row=3, column=1, sticky="w", pady=2, padx=(8, 0)
+        )
+        ttk.Label(self.postgres_frame, text="Contraseña").grid(row=4, column=0, sticky="w", pady=2)
+        self.pg_password_var = tk.StringVar()
+        ttk.Entry(
+            self.postgres_frame, textvariable=self.pg_password_var, show="•", width=28
+        ).grid(row=4, column=1, sticky="w", pady=2, padx=(8, 0))
+        ttk.Button(
+            self.postgres_frame, text="Probar conexión", command=self._handle_test_connection
+        ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(8, 0))
+
+        self.test_result_label = ttk.Label(frame, text="", style="Muted.TLabel", wraplength=380)
+        self.test_result_label.grid(row=5, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        self.error_label = ttk.Label(frame, text="", style="Error.TLabel", wraplength=380)
+        self.error_label.grid(row=6, column=0, columnspan=2, sticky="w", pady=(2, 0))
+
+        button_row = ttk.Frame(frame)
+        button_row.grid(row=7, column=0, columnspan=2, pady=(12, 0))
+        ttk.Button(
+            button_row, text="Guardar", command=self._handle_save, style="Accent.TButton"
+        ).pack(side="left", padx=(0, 6))
+        ttk.Button(button_row, text="Cancelar", command=self.destroy).pack(side="left")
+
+        self._handle_mode_change()
+        self.bind("<Escape>", lambda _e: self.destroy())
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+        center_window(self, parent)
+
+    def _describe_current_source(self) -> str:
+        configured = read_configured_db_url(app_dir())
+        if not configured:
+            return "Origen actual: local (SQLite), en este equipo."
+        try:
+            parts = urlsplit(configured)
+            return f"Origen actual: servidor PostgreSQL en {parts.hostname} / {parts.path.lstrip('/')}."
+        except ValueError:
+            return "Origen actual: servidor PostgreSQL configurado."
+
+    def _handle_mode_change(self) -> None:
+        self.test_result_label.configure(text="")
+        self.error_label.configure(text="")
+        self._tested_ok = False
+        if self.mode_var.get() == "postgres":
+            self.postgres_frame.grid()
+        else:
+            self.postgres_frame.grid_remove()
+
+    def _build_postgres_url(self) -> str:
+        host = self.host_var.get().strip()
+        port = self.port_var.get().strip()
+        dbname = self.dbname_var.get().strip()
+        username = self.pg_username_var.get().strip()
+        password = self.pg_password_var.get()
+        if not host or not port or not dbname or not username or not password:
+            raise ValueError("Rellena todos los campos del servidor PostgreSQL.")
+        if not port.isdigit():
+            raise ValueError("El puerto debe ser un número.")
+        return (
+            f"postgresql://{quote(username, safe='')}:{quote(password, safe='')}"
+            f"@{host}:{port}/{dbname}"
+        )
+
+    def _handle_test_connection(self) -> None:
+        self.error_label.configure(text="")
+        self.test_result_label.configure(text="")
+        self._tested_ok = False
+        try:
+            url = self._build_postgres_url()
+            check_db_connection(url)
+        except ValueError as exc:
+            self.error_label.configure(text=str(exc))
+            return
+        except Exception as exc:
+            self.error_label.configure(text=f"No se pudo conectar: {exc}")
+            return
+        self._tested_ok = True
+        self.test_result_label.configure(text="Conexión correcta.")
+
+    def _handle_save(self) -> None:
+        self.error_label.configure(text="")
+        if self.mode_var.get() == "local":
+            write_configured_db_url(app_dir(), "")
+        else:
+            try:
+                url = self._build_postgres_url()
+            except ValueError as exc:
+                self.error_label.configure(text=str(exc))
+                return
+            if not self._tested_ok:
+                if not messagebox.askyesno(
+                    "Base de datos",
+                    "No se ha probado la conexión con éxito. ¿Guardar de todas formas? "
+                    "Si los datos son incorrectos, la aplicación no podrá arrancar la "
+                    "próxima vez.",
+                    parent=self,
+                ):
+                    return
+            write_configured_db_url(app_dir(), url)
+        messagebox.showinfo(
+            "Base de datos",
+            "Ajuste guardado. Reinicia la aplicación para que el cambio tenga efecto.",
+            parent=self,
+        )
+        self.destroy()
+
+
 _AUDIT_ACTION_LABELS = {
     "login_success": "Inicio de sesión correcto",
     "login_failure": "Inicio de sesión fallido",
@@ -1009,6 +1187,12 @@ class MainWindow(tk.Tk):
                 backup_button.state(["disabled"])
             ttk.Button(
                 sidebar,
+                text="Base de datos...",
+                command=self._open_database_settings,
+                style="Sidebar.TButton",
+            ).pack(fill="x", padx=10, pady=2)
+            ttk.Button(
+                sidebar,
                 text="Registro de auditoría...",
                 command=self._open_audit_log,
                 style="Sidebar.TButton",
@@ -1249,6 +1433,16 @@ class MainWindow(tk.Tk):
         # assert deja además que mypy reduzca el tipo para BackupManagerDialog.
         assert self._backups is not None
         dialog = BackupManagerDialog(self, self._repos, self._backups)
+        self.wait_window(dialog)
+
+    def _open_database_settings(self) -> None:
+        # Mismo motivo que _open_department_manager: el botón que llama a
+        # esto ya está oculto para quien no sea administrador, pero un
+        # ajuste que decide dónde vive TODA la base de datos de la empresa
+        # no debe depender solo de que la barra lateral lo oculte bien.
+        if not self._is_admin:
+            return
+        dialog = DatabaseSettingsDialog(self, self._repos)
         self.wait_window(dialog)
 
     def _open_audit_log(self) -> None:
