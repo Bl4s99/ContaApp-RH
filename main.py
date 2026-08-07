@@ -3,6 +3,7 @@ from __future__ import annotations
 import smtplib
 import sqlite3
 import sys
+import threading
 from datetime import date, datetime
 from tkinter import messagebox
 from types import TracebackType
@@ -26,6 +27,7 @@ from app.logging_config import (
 from app.repository import Repositories
 from app.setup_wizard import SetupWizard
 from app.ui import MainWindow
+from app.update_check import UpdateInfo, check_for_update
 
 DEFAULT_DAY_TYPES = [
     ("Vacaciones", "#2ecc71", True),
@@ -172,6 +174,34 @@ def main() -> None:
                 f"{digest_error}",
                 parent=window,
             )
+
+        last_update_check = repos.app_settings.get_last_update_check_at()
+        if last_update_check is None or last_update_check.date() < date.today():
+            # Se marca en el hilo principal ANTES de lanzar el hilo, no
+            # después: conn se abrió sin check_same_thread=False, así que
+            # escribir en ella desde el hilo en segundo plano lanzaría
+            # sqlite3.ProgrammingError. El hilo en sí no toca repos/conn
+            # para nada, solo hace la petición de red (pura) -- mismo
+            # motivo por el que notify_recipients_in_background() tampoco
+            # toca la base de datos desde su propio hilo.
+            repos.app_settings.set_last_update_check_at(datetime.now())
+
+            def _show_update_notice(info: UpdateInfo) -> None:
+                messagebox.showinfo(
+                    "Actualización disponible",
+                    f"Hay una nueva versión de ContaApp RH disponible: {info.version}\n\n"
+                    f"{info.novedades}\n\n"
+                    f"Descárgala desde: {info.url}",
+                    parent=window,
+                )
+
+            def _check_and_notify() -> None:
+                info = check_for_update()
+                if info is not None:
+                    window.after(0, lambda: _show_update_notice(info))
+
+            threading.Thread(target=_check_and_notify, daemon=True).start()
+
         window.mainloop()
     finally:
         conn.close()

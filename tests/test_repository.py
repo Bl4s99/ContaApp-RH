@@ -3651,6 +3651,15 @@ class TestAppSettingsRepository:
         with pytest.raises(validation.ValidationError):
             AppSettingsRepository(conn).set_company_nif("no-es-un-nif")
 
+    def test_get_last_update_check_at_defaults_to_none(self, conn: sqlite3.Connection) -> None:
+        assert AppSettingsRepository(conn).get_last_update_check_at() is None
+
+    def test_set_last_update_check_at_persists(self, conn: sqlite3.Connection) -> None:
+        repo = AppSettingsRepository(conn)
+        moment = datetime(2026, 8, 7, 12, 30, 0)
+        repo.set_last_update_check_at(moment)
+        assert repo.get_last_update_check_at() == moment
+
 
 class TestCollectiveAgreementRepository:
     def test_create_and_get(self, conn: sqlite3.Connection) -> None:

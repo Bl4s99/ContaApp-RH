@@ -16,3 +16,7 @@ db_config.json
 *.exe
 build/
 dist/
+
+# Generado por ContaApp RH.spec en cada build a partir de app/version.py --
+# no tiene sentido mantener dos copias del número de versión.
+version_info.txt

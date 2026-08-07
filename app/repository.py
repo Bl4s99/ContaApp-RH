@@ -4170,6 +4170,24 @@ class AppSettingsRepository:
                 "UPDATE app_settings SET company_nif = ? WHERE id = 1", (clean_value,)
             )
 
+    def get_last_update_check_at(self) -> datetime | None:
+        row = self._conn.execute(
+            "SELECT last_update_check_at FROM app_settings WHERE id = 1"
+        ).fetchone()
+        if row is None or row["last_update_check_at"] is None:
+            return None
+        return datetime.fromisoformat(str(row["last_update_check_at"]))
+
+    def set_last_update_check_at(self, value: datetime) -> None:
+        # Sin validation.py de por medio a propósito: es un valor generado
+        # por el propio sistema (app/update_check.py), no entrada de
+        # usuario -- mismo criterio que UserRepository.mark_digest_sent.
+        with transaction(self._conn):
+            self._conn.execute(
+                "UPDATE app_settings SET last_update_check_at = ? WHERE id = 1",
+                (value.isoformat(timespec="seconds"),),
+            )
+
 
 @dataclass(frozen=True, slots=True)
 class Repositories:

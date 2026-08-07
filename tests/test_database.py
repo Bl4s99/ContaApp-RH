@@ -67,6 +67,14 @@ class TestMigrationsAreWiredUp:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(app_settings)").fetchall()}
         assert "company_nif" in columns
 
+    def test_init_db_backfills_last_update_check_at_on_a_database_created_without_it(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        conn.execute("ALTER TABLE app_settings DROP COLUMN last_update_check_at")
+        init_db(conn)
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(app_settings)").fetchall()}
+        assert "last_update_check_at" in columns
+
     def test_init_db_is_idempotent_on_an_already_migrated_database(
         self, conn: sqlite3.Connection
     ) -> None:

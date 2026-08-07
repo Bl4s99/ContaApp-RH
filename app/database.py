@@ -195,7 +195,8 @@ CREATE TABLE IF NOT EXISTS app_settings (
     data_retention_years INTEGER NOT NULL DEFAULT 4 CHECK(data_retention_years >= 0),
     company_name TEXT NOT NULL DEFAULT '',
     company_iban TEXT NOT NULL DEFAULT '',
-    company_nif TEXT NOT NULL DEFAULT ''
+    company_nif TEXT NOT NULL DEFAULT '',
+    last_update_check_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS employee_documents (
@@ -591,7 +592,8 @@ CREATE TABLE IF NOT EXISTS app_settings (
     data_retention_years INTEGER NOT NULL DEFAULT 4 CHECK(data_retention_years >= 0),
     company_name TEXT NOT NULL DEFAULT '',
     company_iban TEXT NOT NULL DEFAULT '',
-    company_nif TEXT NOT NULL DEFAULT ''
+    company_nif TEXT NOT NULL DEFAULT '',
+    last_update_check_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS employee_documents (
@@ -844,6 +846,7 @@ def init_db(conn: DbConnection) -> None:
     _migrate_app_settings_vacation_days(conn)
     _migrate_app_settings_company_identity(conn)
     _migrate_app_settings_company_nif(conn)
+    _migrate_app_settings_last_update_check(conn)
     _migrate_employee_absences_status(conn)
     _migrate_users_role_and_department(conn)
     _migrate_users_email_digest(conn)
@@ -993,6 +996,16 @@ def _migrate_app_settings_company_nif(conn: sqlite3.Connection) -> None:
     columns = {row[1] for row in conn.execute("PRAGMA table_info(app_settings)").fetchall()}
     if "company_nif" not in columns:
         conn.execute("ALTER TABLE app_settings ADD COLUMN company_nif TEXT NOT NULL DEFAULT ''")
+
+
+def _migrate_app_settings_last_update_check(conn: sqlite3.Connection) -> None:
+    """Cuándo se comprobó por última vez si hay una versión más reciente
+    (app/update_check.py) -- nulable y sin valor por defecto, como
+    users.last_digest_sent_at: "nunca comprobado" es un estado real, no un
+    valor vacío inventado."""
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(app_settings)").fetchall()}
+    if "last_update_check_at" not in columns:
+        conn.execute("ALTER TABLE app_settings ADD COLUMN last_update_check_at TEXT")
 
 
 def _migrate_employee_absences_status(conn: sqlite3.Connection) -> None:
