@@ -638,6 +638,30 @@ class TestCompanyNif:
             validation.validate_company_nif("no-es-un-nif")
 
 
+class TestCompanyCcc:
+    def test_empty_is_allowed(self) -> None:
+        assert validation.validate_company_ccc("") == ""
+
+    def test_strips_whitespace(self) -> None:
+        assert validation.validate_company_ccc("  28/1234567/89  ") == "28/1234567/89"
+
+    def test_rejects_too_long(self) -> None:
+        with pytest.raises(validation.ValidationError):
+            validation.validate_company_ccc("2" * (validation.MAX_COMPANY_CCC_LENGTH + 1))
+
+
+class TestCompanyAddress:
+    def test_empty_is_allowed(self) -> None:
+        assert validation.validate_company_address("") == ""
+
+    def test_strips_whitespace(self) -> None:
+        assert validation.validate_company_address("  Calle Mayor 1  ") == "Calle Mayor 1"
+
+    def test_rejects_too_long(self) -> None:
+        with pytest.raises(validation.ValidationError):
+            validation.validate_company_address("x" * (validation.MAX_COMPANY_ADDRESS_LENGTH + 1))
+
+
 class TestSsNumber:
     def test_empty_is_allowed(self) -> None:
         assert validation.validate_ss_number("") == ""

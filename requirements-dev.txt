@@ -2,3 +2,4 @@ pytest
 mypy
 pyflakes
 pyinstaller
+types-reportlab

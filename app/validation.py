@@ -196,6 +196,33 @@ def validate_company_name(value: str) -> str:
     return stripped
 
 
+MAX_COMPANY_CCC_LENGTH = 20  # generoso: el formato del CCC ha variado entre reformas
+
+
+def validate_company_ccc(value: str) -> str:
+    # Sin validar el formato exacto (dígitos/separadores) a propósito --
+    # mismo criterio que validate_ss_number: el formato ha cambiado varias
+    # veces y validar mal rechazaría un CCC real, peor que no validar nada.
+    stripped = value.strip()
+    if len(stripped) > MAX_COMPANY_CCC_LENGTH:
+        raise ValidationError(
+            "ccc_empresa", f"no puede superar {MAX_COMPANY_CCC_LENGTH} caracteres"
+        )
+    return stripped
+
+
+MAX_COMPANY_ADDRESS_LENGTH = 200
+
+
+def validate_company_address(value: str) -> str:
+    stripped = value.strip()
+    if len(stripped) > MAX_COMPANY_ADDRESS_LENGTH:
+        raise ValidationError(
+            "domicilio_empresa", f"no puede superar {MAX_COMPANY_ADDRESS_LENGTH} caracteres"
+        )
+    return stripped
+
+
 _DNI_RE = re.compile(r"^(\d{8})([A-Za-z])$")
 _NIE_RE = re.compile(r"^([XYZxyz])(\d{7})([A-Za-z])$")
 _DNI_NIE_CONTROL_LETTERS = "TRWAGMYFPDXBNJZSQVHLCKE"

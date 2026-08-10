@@ -3273,7 +3273,13 @@ class PayrollRecordRepository:
     def __init__(self, conn: DbConnection) -> None:
         self._conn = conn
 
-    def generate(self, employee_id: int, year: int, month: int) -> PayrollRecord:
+    def generate(
+        self,
+        employee_id: int,
+        year: int,
+        month: int,
+        irpf_pct_override: float | None = None,
+    ) -> PayrollRecord:
         """Calcula la nómina con el salario/hijos a cargo/% SS VIGENTES del
         empleado y los complementos/anticipos YA REGISTRADOS para ese
         empleado/mes, y la persiste como snapshot histórico. Si ya existía un
@@ -3281,12 +3287,20 @@ class PayrollRecordRepository:
         corrección, o tras añadir un complemento a posteriori, es un caso de
         uso válido, no un error) -- un complemento añadido DESPUÉS de generar
         no altera silenciosamente el registro ya congelado, igual que un
-        cambio de salario tampoco lo hace."""
+        cambio de salario tampoco lo hace.
+
+        irpf_pct_override, si se da, sustituye la estimación automática de
+        IRPF por un valor real (p. ej. el que ya ha calculado una gestoría) --
+        ver calculate_monthly_payroll() para el porqué. Validado con techo
+        100%, no el 47% de MAX_TIPO_RETENCION_PCT (ese tope es solo de la
+        estimación interna)."""
         employee_row = self._conn.execute(
             "SELECT salary, dependent_children FROM employees WHERE id = ?", (employee_id,)
         ).fetchone()
         if employee_row is None:
             raise NotFoundError(f"no existe el empleado con id {employee_id}")
+        if irpf_pct_override is not None:
+            irpf_pct_override = validation.validate_percentage(irpf_pct_override, "irpf")
         settings_row = self._conn.execute(
             "SELECT ss_employee_pct, ss_employer_pct FROM payroll_settings WHERE id = 1"
         ).fetchone()
@@ -3309,6 +3323,7 @@ class PayrollRecordRepository:
             year=year,
             supplements_total=supplements_total,
             advances_total=advances_total,
+            irpf_pct_override=irpf_pct_override,
         )
         generated_at = datetime.now().replace(microsecond=0)
         with transaction(self._conn):
@@ -4184,6 +4199,34 @@ class AppSettingsRepository:
         with transaction(self._conn):
             self._conn.execute(
                 "UPDATE app_settings SET company_nif = ? WHERE id = 1", (clean_value,)
+            )
+
+    def get_company_ccc(self) -> str:
+        row = self._conn.execute("SELECT company_ccc FROM app_settings WHERE id = 1").fetchone()
+        if row is None:
+            return ""
+        return str(row["company_ccc"])
+
+    def set_company_ccc(self, value: str) -> None:
+        clean_value = validation.validate_company_ccc(value)
+        with transaction(self._conn):
+            self._conn.execute(
+                "UPDATE app_settings SET company_ccc = ? WHERE id = 1", (clean_value,)
+            )
+
+    def get_company_address(self) -> str:
+        row = self._conn.execute(
+            "SELECT company_address FROM app_settings WHERE id = 1"
+        ).fetchone()
+        if row is None:
+            return ""
+        return str(row["company_address"])
+
+    def set_company_address(self, value: str) -> None:
+        clean_value = validation.validate_company_address(value)
+        with transaction(self._conn):
+            self._conn.execute(
+                "UPDATE app_settings SET company_address = ? WHERE id = 1", (clean_value,)
             )
 
     def get_last_update_check_at(self) -> datetime | None:

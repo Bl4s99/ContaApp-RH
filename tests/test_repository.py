@@ -2726,6 +2726,35 @@ class TestPayrollRecordRepository:
         with pytest.raises(NotFoundError):
             PayrollRecordRepository(conn).generate(999, 2026, 3)
 
+    def test_generate_with_irpf_override_uses_the_given_percentage(
+        self, conn: sqlite3.Connection, employee_id: int
+    ) -> None:
+        record = PayrollRecordRepository(conn).generate(
+            employee_id, 2026, 3, irpf_pct_override=12.5
+        )
+        assert record.payroll.irpf_pct == 12.5
+        assert record.payroll.irpf_importe == round(record.payroll.bruto_mes * 12.5 / 100.0, 2)
+
+    def test_generate_with_irpf_override_rejects_value_over_100(
+        self, conn: sqlite3.Connection, employee_id: int
+    ) -> None:
+        with pytest.raises(validation.ValidationError):
+            PayrollRecordRepository(conn).generate(employee_id, 2026, 3, irpf_pct_override=150.0)
+
+    def test_regenerating_without_override_does_not_reuse_the_previous_one(
+        self, conn: sqlite3.Connection, employee_id: int
+    ) -> None:
+        # El repositorio en sí no recuerda el override anterior -- es
+        # GeneratePayrollDialog (app/payroll_ui.py) quien lo rellena de
+        # nuevo leyendo el registro existente antes de volver a llamar a
+        # generate(). Este test confirma que ese "recordar" no ocurre por
+        # accidente a este nivel, para que quede claro que es
+        # responsabilidad de quien llama.
+        repo = PayrollRecordRepository(conn)
+        repo.generate(employee_id, 2026, 3, irpf_pct_override=12.5)
+        regenerated = repo.generate(employee_id, 2026, 3)
+        assert regenerated.payroll.irpf_pct != 12.5
+
     def test_regenerating_overwrites_the_snapshot(
         self, conn: sqlite3.Connection, employee_id: int, department_id: int
     ) -> None:
@@ -3650,6 +3679,22 @@ class TestAppSettingsRepository:
     def test_set_company_nif_rejects_invalid_format(self, conn: sqlite3.Connection) -> None:
         with pytest.raises(validation.ValidationError):
             AppSettingsRepository(conn).set_company_nif("no-es-un-nif")
+
+    def test_get_company_ccc_defaults_to_empty(self, conn: sqlite3.Connection) -> None:
+        assert AppSettingsRepository(conn).get_company_ccc() == ""
+
+    def test_set_company_ccc_persists(self, conn: sqlite3.Connection) -> None:
+        repo = AppSettingsRepository(conn)
+        repo.set_company_ccc("28/1234567/89")
+        assert repo.get_company_ccc() == "28/1234567/89"
+
+    def test_get_company_address_defaults_to_empty(self, conn: sqlite3.Connection) -> None:
+        assert AppSettingsRepository(conn).get_company_address() == ""
+
+    def test_set_company_address_persists(self, conn: sqlite3.Connection) -> None:
+        repo = AppSettingsRepository(conn)
+        repo.set_company_address("Calle Mayor 1, 28001 Madrid")
+        assert repo.get_company_address() == "Calle Mayor 1, 28001 Madrid"
 
     def test_get_last_update_check_at_defaults_to_none(self, conn: sqlite3.Connection) -> None:
         assert AppSettingsRepository(conn).get_last_update_check_at() is None

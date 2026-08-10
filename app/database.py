@@ -196,6 +196,8 @@ CREATE TABLE IF NOT EXISTS app_settings (
     company_name TEXT NOT NULL DEFAULT '',
     company_iban TEXT NOT NULL DEFAULT '',
     company_nif TEXT NOT NULL DEFAULT '',
+    company_ccc TEXT NOT NULL DEFAULT '',
+    company_address TEXT NOT NULL DEFAULT '',
     last_update_check_at TEXT
 );
 
@@ -593,6 +595,8 @@ CREATE TABLE IF NOT EXISTS app_settings (
     company_name TEXT NOT NULL DEFAULT '',
     company_iban TEXT NOT NULL DEFAULT '',
     company_nif TEXT NOT NULL DEFAULT '',
+    company_ccc TEXT NOT NULL DEFAULT '',
+    company_address TEXT NOT NULL DEFAULT '',
     last_update_check_at TEXT
 );
 
@@ -863,6 +867,7 @@ def init_db(conn: DbConnection) -> None:
     _migrate_employees_head_of_department_id(conn)
     _migrate_employees_professional_category_id(conn)
     _migrate_employees_self_service_pin(conn)
+    _migrate_app_settings_company_ccc_address(conn)
     conn.executescript(SCHEMA_INDEXES)
     conn.execute(
         "INSERT OR IGNORE INTO payroll_settings (id, ss_employee_pct, ss_employer_pct) "
@@ -996,6 +1001,20 @@ def _migrate_app_settings_company_nif(conn: sqlite3.Connection) -> None:
     columns = {row[1] for row in conn.execute("PRAGMA table_info(app_settings)").fetchall()}
     if "company_nif" not in columns:
         conn.execute("ALTER TABLE app_settings ADD COLUMN company_nif TEXT NOT NULL DEFAULT ''")
+
+
+def _migrate_app_settings_company_ccc_address(conn: sqlite3.Connection) -> None:
+    """Código de Cuenta de Cotización y domicilio de la propia empresa,
+    recogidos para poder generar una nómina en PDF con una cabecera real
+    (ver app/payroll_pdf.py) -- añadidos mucho después de company_nif, de
+    ahí una migración separada en vez de ampliarla."""
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(app_settings)").fetchall()}
+    if "company_ccc" not in columns:
+        conn.execute("ALTER TABLE app_settings ADD COLUMN company_ccc TEXT NOT NULL DEFAULT ''")
+    if "company_address" not in columns:
+        conn.execute(
+            "ALTER TABLE app_settings ADD COLUMN company_address TEXT NOT NULL DEFAULT ''"
+        )
 
 
 def _migrate_app_settings_last_update_check(conn: sqlite3.Connection) -> None:

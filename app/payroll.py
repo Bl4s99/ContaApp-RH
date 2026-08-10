@@ -149,6 +149,7 @@ def calculate_monthly_payroll(
     year: int,
     supplements_total: float = 0.0,
     advances_total: float = 0.0,
+    irpf_pct_override: float | None = None,
 ) -> MonthlyPayroll:
     """supplements_total (pluses + horas extra) y advances_total (anticipos ya
     pagados) son ajustes puntuales de UN mes concreto, no del salario anual
@@ -158,20 +159,31 @@ def calculate_monthly_payroll(
     (sin complementos, que son variables mes a mes y no se pueden proyectar
     con la misma fiabilidad), pero el IMPORTE retenido si se aplica sobre el
     bruto del mes ya con los complementos incluidos -- igual que hacen en la
-    práctica muchos programas de nómina reales con las percepciones variables."""
+    práctica muchos programas de nómina reales con las percepciones variables.
+
+    irpf_pct_override, si se da, sustituye a estimate_irpf_withholding_rate()
+    por completo -- pensado para el % real que una gestoría ya ha calculado
+    (con tramo autonómico, discapacidad, etc. que esta estimación no cubre,
+    ver el aviso al principio del módulo), no solo para corregir la
+    estimación interna. Por eso no se limita a MAX_TIPO_RETENCION_PCT: ese
+    tope es del procedimiento de ESTIMACIÓN, no una regla general del IRPF."""
     if not 1 <= month <= 12:
         raise ValueError(f"mes fuera de rango: {month}")
     if supplements_total < 0:
         raise ValueError("supplements_total no puede ser negativo")
     if advances_total < 0:
         raise ValueError("advances_total no puede ser negativo")
+    if irpf_pct_override is not None and irpf_pct_override < 0:
+        raise ValueError("irpf_pct_override no puede ser negativo")
 
     paga_ordinaria = round(annual_gross_salary / PAGAS_TOTALES, 2)
     paga_extra = paga_ordinaria if month in MESES_PAGA_EXTRA else 0.0
     bruto_mes = round(paga_ordinaria + paga_extra + supplements_total, 2)
 
-    irpf_pct = estimate_irpf_withholding_rate(
-        annual_gross_salary, ss_employee_pct, dependent_children
+    irpf_pct = (
+        round(irpf_pct_override, 2)
+        if irpf_pct_override is not None
+        else estimate_irpf_withholding_rate(annual_gross_salary, ss_employee_pct, dependent_children)
     )
     irpf_importe = round(bruto_mes * irpf_pct / 100.0, 2)
 

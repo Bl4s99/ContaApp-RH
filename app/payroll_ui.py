@@ -10,7 +10,8 @@ from app import theme, validation
 from app.calendar_widget import MONTH_NAMES, DateEntry, shift_month
 from app.gestoria_export import build_gestoria_rows, write_gestoria_csv
 from app.models import Department, Employee
-from app.payroll import MonthlyPayroll, calculate_monthly_payroll
+from app.payroll import MonthlyPayroll, calculate_monthly_payroll, estimate_irpf_withholding_rate
+from app.payroll_pdf import CompanyInfo, build_payroll_pdf
 from app.repository import Repositories, RepositoryError
 from app.sepa_export import SepaPayment, build_sepa_payments, build_sepa_xml
 from app.window_utils import center_window
@@ -146,32 +147,45 @@ class SepaExportDialog(tk.Toplevel):
         ttk.Entry(frame, textvariable=self.company_nif_var, width=36).grid(
             row=3, column=1, sticky="w", pady=3
         )
+        # C.C.C. y domicilio: no hacen falta para el fichero SEPA en sí (por
+        # eso viven en este mismo diálogo en vez de uno nuevo -- ver
+        # app/payroll_pdf.py), pero sí para la cabecera de la nómina en PDF.
+        ttk.Label(frame, text="C.C.C. (cotización)").grid(row=4, column=0, sticky="w", pady=3)
+        self.company_ccc_var = tk.StringVar(value=repos.app_settings.get_company_ccc())
+        ttk.Entry(frame, textvariable=self.company_ccc_var, width=36).grid(
+            row=4, column=1, sticky="w", pady=3
+        )
+        ttk.Label(frame, text="Domicilio").grid(row=5, column=0, sticky="w", pady=3)
+        self.company_address_var = tk.StringVar(value=repos.app_settings.get_company_address())
+        ttk.Entry(frame, textvariable=self.company_address_var, width=36).grid(
+            row=5, column=1, sticky="w", pady=3
+        )
         ttk.Button(
             frame, text="Guardar datos de la empresa", command=self._handle_save_company
-        ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(2, 0))
+        ).grid(row=6, column=0, columnspan=2, sticky="w", pady=(2, 0))
         self.company_error_label = ttk.Label(frame, text="", style="Error.TLabel", wraplength=420)
-        self.company_error_label.grid(row=5, column=0, columnspan=2, sticky="w", pady=(2, 0))
+        self.company_error_label.grid(row=7, column=0, columnspan=2, sticky="w", pady=(2, 0))
 
         ttk.Separator(frame, orient="horizontal").grid(
-            row=6, column=0, columnspan=2, sticky="ew", pady=12
+            row=8, column=0, columnspan=2, sticky="ew", pady=12
         )
 
         ttk.Label(frame, text="Fecha de ejecución solicitada").grid(
-            row=7, column=0, sticky="w", pady=3
+            row=9, column=0, sticky="w", pady=3
         )
         self.execution_date = DateEntry(
             frame, initial=date.today() + timedelta(days=1), min_date=date.today()
         )
-        self.execution_date.grid(row=7, column=1, sticky="w", pady=3)
+        self.execution_date.grid(row=9, column=1, sticky="w", pady=3)
 
         ttk.Label(
             frame,
             text=f"Nóminas generadas de {MONTH_NAMES[month - 1]} {year}",
             style="PageHeading.TLabel",
-        ).grid(row=8, column=0, columnspan=2, sticky="w", pady=(12, 4))
+        ).grid(row=10, column=0, columnspan=2, sticky="w", pady=(12, 4))
 
         tree_frame = ttk.Frame(frame)
-        tree_frame.grid(row=9, column=0, columnspan=2, sticky="nsew")
+        tree_frame.grid(row=11, column=0, columnspan=2, sticky="nsew")
         self.tree = ttk.Treeview(
             tree_frame, columns=("empleado", "iban", "importe"), show="headings", height=8
         )
@@ -189,10 +203,10 @@ class SepaExportDialog(tk.Toplevel):
         self.summary_label = ttk.Label(
             frame, text="", style="Muted.TLabel", wraplength=480, justify="left"
         )
-        self.summary_label.grid(row=10, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        self.summary_label.grid(row=12, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
         button_row = ttk.Frame(frame)
-        button_row.grid(row=11, column=0, columnspan=2, pady=(12, 0))
+        button_row.grid(row=13, column=0, columnspan=2, pady=(12, 0))
         self.export_button = ttk.Button(
             button_row,
             text="Generar fichero SEPA...",
@@ -202,7 +216,7 @@ class SepaExportDialog(tk.Toplevel):
         self.export_button.pack(side="left", padx=(0, 6))
         ttk.Button(button_row, text="Cerrar", command=self.destroy).pack(side="left")
         self.export_error_label = ttk.Label(frame, text="", style="Error.TLabel", wraplength=480)
-        self.export_error_label.grid(row=12, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        self.export_error_label.grid(row=14, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
         self.bind("<Escape>", lambda _e: self.destroy())
         self.protocol("WM_DELETE_WINDOW", self.destroy)
@@ -256,6 +270,8 @@ class SepaExportDialog(tk.Toplevel):
             self._repos.app_settings.set_company_name(self.company_name_var.get())
             self._repos.app_settings.set_company_iban(self.company_iban_var.get())
             self._repos.app_settings.set_company_nif(self.company_nif_var.get())
+            self._repos.app_settings.set_company_ccc(self.company_ccc_var.get())
+            self._repos.app_settings.set_company_address(self.company_address_var.get())
         except validation.ValidationError as exc:
             self.company_error_label.configure(text=str(exc))
             return
@@ -263,6 +279,8 @@ class SepaExportDialog(tk.Toplevel):
         self.company_name_var.set(self._repos.app_settings.get_company_name())
         self.company_iban_var.set(self._repos.app_settings.get_company_iban())
         self.company_nif_var.set(self._repos.app_settings.get_company_nif())
+        self.company_ccc_var.set(self._repos.app_settings.get_company_ccc())
+        self.company_address_var.set(self._repos.app_settings.get_company_address())
 
     def _handle_export(self) -> None:
         if not self._payments:
@@ -442,6 +460,117 @@ class PayrollSupplementDialog(tk.Toplevel):
         self.destroy()
 
 
+class GeneratePayrollDialog(tk.Toplevel):
+    """Sustituye al simple askyesno que había antes: además de confirmar
+    (si ya existe una nómina de este mes, se dice como texto en vez de un
+    segundo diálogo aparte) deja fijar el % de IRPF de este trabajador en
+    concreto -- una gestoría a menudo ya ha calculado el % real (con tramo
+    autonómico, discapacidad, etc. que la estimación de esta app no cubre,
+    ver app/payroll.py), y necesita poder introducirlo aquí en vez de
+    fiarse solo del cálculo interno."""
+
+    def __init__(
+        self,
+        parent: tk.Misc,
+        repos: Repositories,
+        employee: Employee,
+        year: int,
+        month: int,
+        on_change: Callable[[], None],
+    ) -> None:
+        super().__init__(parent)
+        self.title("Generar nómina")
+        self.resizable(False, False)
+        self.transient(parent.winfo_toplevel())
+        self.grab_set()
+
+        self._repos = repos
+        self._employee = employee
+        self._year = year
+        self._month = month
+        self._on_change = on_change
+
+        assert employee.id is not None
+        existing = repos.payroll_records.get(employee.id, year, month)
+
+        frame = ttk.Frame(self, padding=12)
+        frame.grid(row=0, column=0, sticky="nsew")
+
+        ttk.Label(
+            frame,
+            text=f"{employee.full_name} — {MONTH_NAMES[month - 1]} {year}",
+            style="PageHeading.TLabel",
+        ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
+
+        if existing is not None:
+            ttk.Label(
+                frame,
+                text=(
+                    "Ya existe una nómina generada el "
+                    f"{existing.generated_at.strftime('%d/%m/%Y %H:%M')} para este mes. "
+                    "Se sustituirá por el nuevo cálculo."
+                ),
+                style="Muted.TLabel",
+                wraplength=340,
+                justify="left",
+            ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, 10))
+            default_irpf = existing.payroll.irpf_pct
+        else:
+            settings = repos.payroll_settings.get()
+            default_irpf = estimate_irpf_withholding_rate(
+                employee.salary, settings.ss_employee_pct, employee.dependent_children
+            )
+
+        ttk.Label(frame, text="% IRPF de este trabajador").grid(
+            row=2, column=0, sticky="w", pady=3
+        )
+        self.irpf_var = tk.StringVar(value=f"{default_irpf:g}")
+        ttk.Entry(frame, textvariable=self.irpf_var, width=12).grid(
+            row=2, column=1, sticky="w", pady=3
+        )
+        ttk.Label(
+            frame,
+            text="Relleno con la estimación automática — corrígelo si tu gestoría ya te ha dado el % real.",
+            style="Muted.TLabel",
+            wraplength=340,
+            justify="left",
+        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(0, 8))
+
+        self.error_label = ttk.Label(frame, text="", style="Error.TLabel", wraplength=340)
+        self.error_label.grid(row=4, column=0, columnspan=2, sticky="w", pady=(2, 0))
+
+        button_row = ttk.Frame(frame)
+        button_row.grid(row=5, column=0, columnspan=2, pady=(10, 0))
+        ttk.Button(
+            button_row,
+            text="Regenerar" if existing is not None else "Generar",
+            command=self._handle_submit,
+            style="Accent.TButton",
+        ).pack(side="left", padx=(0, 6))
+        ttk.Button(button_row, text="Cancelar", command=self.destroy).pack(side="left")
+
+        self.bind("<Escape>", lambda _e: self.destroy())
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+        center_window(self, parent)
+
+    def _handle_submit(self) -> None:
+        try:
+            irpf_pct = float(self.irpf_var.get().strip().replace(",", "."))
+        except ValueError:
+            self.error_label.configure(text="El % de IRPF debe ser un número.")
+            return
+        assert self._employee.id is not None
+        try:
+            self._repos.payroll_records.generate(
+                self._employee.id, self._year, self._month, irpf_pct_override=irpf_pct
+            )
+        except (validation.ValidationError, RepositoryError) as exc:
+            self.error_label.configure(text=str(exc))
+            return
+        self._on_change()
+        self.destroy()
+
+
 class PayrollPage(ttk.Frame):
     def __init__(
         self,
@@ -572,6 +701,16 @@ class PayrollPage(ttk.Frame):
             status_row, text="Generar nómina de este mes", command=self._handle_generate
         )
         self.generate_button.pack(side="left", padx=(10, 0))
+        # Sin restringir a administradores (a diferencia de "Configurar %
+        # Seguridad Social.../Exportar SEPA.../Exportar para gestoría..."):
+        # sigue el mismo criterio que "Generar nómina de este mes", que
+        # tampoco lo está -- descargar el PDF de una nómina de un empleado
+        # es la acción natural que sigue a generarla, no una acción de toda
+        # la empresa.
+        self.download_pdf_button = ttk.Button(
+            status_row, text="Descargar PDF...", command=self._handle_download_pdf
+        )
+        self.download_pdf_button.pack(side="left", padx=(6, 0))
 
         self.breakdown_frame = ttk.Frame(detail_frame)
         self.breakdown_frame.pack(side="top", anchor="w", fill="x")
@@ -758,6 +897,7 @@ class PayrollPage(ttk.Frame):
             self.employee_heading.configure(text="Selecciona un empleado")
             self.record_status_label.configure(text="")
             self.generate_button.state(["disabled"])
+            self.download_pdf_button.state(["disabled"])
             ttk.Label(
                 self.breakdown_frame,
                 text="Elige un empleado de la lista para ver su nómina.",
@@ -779,6 +919,7 @@ class PayrollPage(ttk.Frame):
                 )
             )
             self.generate_button.configure(text="Regenerar nómina de este mes...")
+            self.download_pdf_button.state(["!disabled"])
             # El salario/hijos a cargo mostrados deben ser los CONGELADOS
             # en el snapshot, no los actuales del empleado -- si su sueldo
             # cambió después de generar esta nómina, mostrar el actual aquí
@@ -793,6 +934,9 @@ class PayrollPage(ttk.Frame):
         else:
             self.record_status_label.configure(text="Aún no se ha generado la nómina de este mes (estimación en vivo).")
             self.generate_button.configure(text="Generar nómina de este mes")
+            # Nunca se descarga un PDF de una estimación en vivo -- mismo
+            # criterio que SepaExportDialog ya documenta para sí mismo.
+            self.download_pdf_button.state(["disabled"])
             settings = self._repos.payroll_settings.get()
             supplements_total, advances_total = self._repos.payroll_supplements.totals_for_employee_month(
                 employee.id, self._view_year, self._view_month
@@ -815,16 +959,69 @@ class PayrollPage(ttk.Frame):
         employee = self._selected_employee
         if employee is None:
             return
-        assert employee.id is not None
-        existing = self._repos.payroll_records.get(employee.id, self._view_year, self._view_month)
-        if existing is not None and not messagebox.askyesno(
-            "Regenerar nómina",
-            "Ya existe una nómina generada para este mes. ¿Sustituirla por el cálculo actual?",
-            parent=self,
-        ):
+        GeneratePayrollDialog(
+            self,
+            self._repos,
+            employee,
+            self._view_year,
+            self._view_month,
+            on_change=self._render_breakdown,
+        )
+
+    def _handle_download_pdf(self) -> None:
+        employee = self._selected_employee
+        if employee is None:
             return
-        self._repos.payroll_records.generate(employee.id, self._view_year, self._view_month)
-        self._render_breakdown()
+        assert employee.id is not None
+        record = self._repos.payroll_records.get(employee.id, self._view_year, self._view_month)
+        if record is None:
+            messagebox.showinfo(
+                "Descargar PDF", "Genera primero la nómina de este mes.", parent=self
+            )
+            return
+        department = self._repos.departments.get(employee.department_id)
+        professional_category = (
+            self._repos.professional_categories.get(employee.professional_category_id)
+            if employee.professional_category_id is not None
+            else None
+        )
+        supplements = self._repos.payroll_supplements.list_for_employee_month(
+            employee.id, self._view_year, self._view_month
+        )
+        company = CompanyInfo(
+            name=self._repos.app_settings.get_company_name(),
+            nif=self._repos.app_settings.get_company_nif(),
+            ccc=self._repos.app_settings.get_company_ccc(),
+            address=self._repos.app_settings.get_company_address(),
+        )
+        pdf_bytes = build_payroll_pdf(
+            employee=employee,
+            department_name=department.name,
+            professional_category_name=(
+                professional_category.name if professional_category is not None else None
+            ),
+            company=company,
+            record=record,
+            supplements=supplements,
+        )
+        path_str = filedialog.asksaveasfilename(
+            title="Guardar nómina en PDF",
+            defaultextension=".pdf",
+            filetypes=[("PDF", "*.pdf")],
+            initialfile=(
+                f"nomina_{employee.full_name.replace(' ', '_')}_"
+                f"{self._view_year}{self._view_month:02d}.pdf"
+            ),
+            parent=self,
+        )
+        if not path_str:
+            return
+        try:
+            Path(path_str).write_bytes(pdf_bytes)
+        except OSError as exc:
+            messagebox.showerror("Descargar PDF", str(exc), parent=self)
+            return
+        messagebox.showinfo("Descargar PDF", "PDF generado correctamente.", parent=self)
 
     def _refresh_history(self) -> None:
         self.history_tree.delete(*self.history_tree.get_children())

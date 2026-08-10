@@ -273,3 +273,50 @@ class TestCalculateMonthlyPayrollWithSupplements:
             calculate_monthly_payroll(
                 24000, 0, 6.35, 31.40, month=3, year=2026, advances_total=-1.0
             )
+
+
+class TestCalculateMonthlyPayrollWithIrpfOverride:
+    def test_none_preserves_the_automatic_estimate(self) -> None:
+        with_none = calculate_monthly_payroll(
+            24000, 0, 6.35, 31.40, month=3, year=2026, irpf_pct_override=None
+        )
+        without_param = calculate_monthly_payroll(24000, 0, 6.35, 31.40, month=3, year=2026)
+        assert with_none == without_param
+
+    def test_override_replaces_the_estimated_rate(self) -> None:
+        base = calculate_monthly_payroll(24000, 0, 6.35, 31.40, month=3, year=2026)
+        overridden = calculate_monthly_payroll(
+            24000, 0, 6.35, 31.40, month=3, year=2026, irpf_pct_override=25.0
+        )
+        assert overridden.irpf_pct == 25.0
+        assert overridden.irpf_pct != base.irpf_pct
+
+    def test_override_changes_irpf_importe_and_neto(self) -> None:
+        result = calculate_monthly_payroll(
+            24000, 0, 6.35, 31.40, month=3, year=2026, irpf_pct_override=25.0
+        )
+        assert result.irpf_importe == round(result.bruto_mes * 25.0 / 100.0, 2)
+        assert result.neto == round(
+            result.bruto_mes - result.irpf_importe - result.ss_employee_importe, 2
+        )
+
+    def test_override_is_rounded_to_two_decimals(self) -> None:
+        result = calculate_monthly_payroll(
+            24000, 0, 6.35, 31.40, month=3, year=2026, irpf_pct_override=12.3456
+        )
+        assert result.irpf_pct == 12.35
+
+    def test_override_is_not_capped_at_the_estimation_ceiling(self) -> None:
+        # MAX_TIPO_RETENCION_PCT (47.0) solo limita la ESTIMACIÓN automática
+        # -- un override representa un valor real que puede legítimamente
+        # superarlo.
+        result = calculate_monthly_payroll(
+            24000, 0, 6.35, 31.40, month=3, year=2026, irpf_pct_override=60.0
+        )
+        assert result.irpf_pct == 60.0
+
+    def test_negative_override_rejected(self) -> None:
+        with pytest.raises(ValueError):
+            calculate_monthly_payroll(
+                24000, 0, 6.35, 31.40, month=3, year=2026, irpf_pct_override=-1.0
+            )
