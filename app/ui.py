@@ -791,6 +791,19 @@ class DatabaseSettingsDialog(tk.Toplevel):
         self.error_label = ttk.Label(frame, text="", style="Error.TLabel", wraplength=380)
         self.error_label.grid(row=6, column=0, columnspan=2, sticky="w", pady=(2, 0))
 
+        # Un test exitoso solo es válido para la URL exacta que se probó --
+        # si se edita cualquier campo después (p. ej. se corrige la
+        # contraseña), _tested_ok debe volver a False para no guardar como
+        # "probada" una URL que en realidad nunca se llegó a probar.
+        for pg_var in (
+            self.host_var,
+            self.port_var,
+            self.dbname_var,
+            self.pg_username_var,
+            self.pg_password_var,
+        ):
+            pg_var.trace_add("write", lambda *_a: self._reset_test_state())
+
         button_row = ttk.Frame(frame)
         button_row.grid(row=7, column=0, columnspan=2, pady=(12, 0))
         ttk.Button(
@@ -813,10 +826,13 @@ class DatabaseSettingsDialog(tk.Toplevel):
         except ValueError:
             return "Origen actual: servidor PostgreSQL configurado."
 
-    def _handle_mode_change(self) -> None:
+    def _reset_test_state(self) -> None:
         self.test_result_label.configure(text="")
         self.error_label.configure(text="")
         self._tested_ok = False
+
+    def _handle_mode_change(self) -> None:
+        self._reset_test_state()
         if self.mode_var.get() == "postgres":
             self.postgres_frame.grid()
         else:
@@ -838,9 +854,7 @@ class DatabaseSettingsDialog(tk.Toplevel):
         )
 
     def _handle_test_connection(self) -> None:
-        self.error_label.configure(text="")
-        self.test_result_label.configure(text="")
-        self._tested_ok = False
+        self._reset_test_state()
         try:
             url = self._build_postgres_url()
             check_db_connection(url)

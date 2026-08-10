@@ -18,25 +18,31 @@ traducción real que hace falta es de marcador posicional a marcador con
 nombre (":p0", ":p1"...), que es lo único que sqlalchemy.text() acepta
 para no atarse a un driver concreto. Ver _translate_qmark_params().
 
-Límite honesto, no escondido: este adaptador se ha verificado con un
-ejercicio exhaustivo de tests (ver tests/test_db_engine.py) y contra la
-suite completa de la aplicación corriendo sobre SQLite a través de él,
-pero NO se ha podido ejecutar ni una sola vez contra un PostgreSQL real en
-este entorno (sin servidor disponible, y no es apropiado instalar uno
-como parte de esta tarea). El camino PostgreSQL es sólido por diseño y
-por revisión, no por verificación empírica -- quien lo active por primera
-vez en un PostgreSQL real debería tratarlo como recién estrenado, no como
-ya probado en producción."""
+Verificado contra un PostgreSQL real (17.10, binarios oficiales de
+EnterpriseDB, servidor local desechable): ver tests/test_postgres_integration.py
+-- opt-in vía CONTAAPP_RH_TEST_POSTGRES_URL, cubre creación de esquema
+desde cero, login case-insensitive, traducción de duplicados y de
+violaciones de FK, CRUD con id autogenerado, y búsqueda case-insensitive.
+Esa primera ejecución real encontró y corrigió tres bugs que ningún test
+contra SQLite podía detectar: `COLLATE NOCASE` en dos consultas de
+repository.py (inválido en Postgres, borrado -- ver authenticate() y
+authenticate_self_service()), `result.is_insert` de SQLAlchemy siempre
+False para SQL en texto plano (dejaba `lastrowid` en None para todo
+INSERT, ver PostgresCursor.__init__ e _is_insert_statement()), y
+`lastval()` abortando la transacción entera cuando un INSERT no genera
+ningún valor de secuencia (ver el SAVEPOINT en PostgresCursor.__init__).
+La suite completa de la aplicación (SQLite) sigue pasando sin cambios de
+comportamiento a través de esta misma capa -- es la evidencia de que la
+abstracción no alteró nada existente."""
 from __future__ import annotations
 
 import json
+import sqlite3
 from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, Union, runtime_checkable
 
 if TYPE_CHECKING:
-    import sqlite3
-
     import sqlalchemy
 
 DB_URL_ENV_VAR = "CONTAAPP_RH_DB_URL"
@@ -150,6 +156,14 @@ def _split_sql_statements(script: str) -> list[str]:
     return [stmt.strip() for stmt in script.split(";") if stmt.strip()]
 
 
+def _is_insert_statement(sql: str) -> bool:
+    # Suficiente para el SQL propio de este proyecto: cada INSERT empieza
+    # literalmente por "INSERT" (sin CTEs "WITH ... INSERT", comprobado por
+    # grep) -- no es una detección genérica. Ver PostgresCursor.__init__
+    # para por qué hace falta esto en vez de result.is_insert.
+    return sql.lstrip().upper().startswith("INSERT")
+
+
 class _RowAdapter:
     """Una fila de SQLAlchemy con acceso por nombre de columna
     (row["columna"]) además de por posición (row[0]) -- mismo interfaz que
@@ -172,22 +186,60 @@ class _RowAdapter:
 
 class PostgresCursor:
     def __init__(
-        self, result: "sqlalchemy.engine.CursorResult[Any]", conn: "sqlalchemy.engine.Connection"
+        self,
+        result: "sqlalchemy.engine.CursorResult[Any]",
+        conn: "sqlalchemy.engine.Connection",
+        is_insert: bool,
     ) -> None:
         self._rowcount = result.rowcount
         self._rows: list[_RowAdapter] = []
         self._lastrowid: int | None = None
         if result.returns_rows:
             self._rows = [_RowAdapter(row) for row in result.fetchall()]
-        elif result.is_insert:
+        elif is_insert:
             # PostgreSQL no rellena cursor.lastrowid (eso es una extensión
             # de DBAPI propia de sqlite3/MySQL sin equivalente directo en
             # Postgres, que usa RETURNING) -- lastval() devuelve el último
             # valor generado por CUALQUIER secuencia en esta sesión, el
             # mismo papel que lastrowid cumple aquí: siempre se consulta
             # justo después de un INSERT, nunca más tarde.
-            lastval_result = conn.execute(_sqlalchemy_text("SELECT lastval()"))
-            self._lastrowid = lastval_result.scalar()
+            #
+            # is_insert se recibe ya calculado (ver _is_insert_statement),
+            # en vez de usar result.is_insert de SQLAlchemy, porque ese
+            # atributo solo funciona para construcciones Core (Insert()) --
+            # comprobado empíricamente contra un servidor real que para SQL
+            # en texto plano ejecutado vía sqlalchemy.text() (como TODO el
+            # SQL de este proyecto, ver el docstring del módulo) siempre
+            # vale False incluso para un INSERT real, dejando lastrowid en
+            # None para siempre. Bug real, no hipotético: encontrado al
+            # ejecutar esto por primera vez contra un PostgreSQL real.
+            #
+            # lastval() puede fallar con "lastval no está definido en esta
+            # sesión" cuando el INSERT no generó ningún valor de secuencia
+            # -- p. ej. init_db() inserta las filas semilla de
+            # payroll_settings/app_settings con un id explícito (id=1), sin
+            # tocar ninguna IDENTITY. Ese caso es real (no hipotético,
+            # también encontrado al ejecutar esto por primera vez) y no es
+            # un error: simplemente no hay ningún id autogenerado que
+            # devolver, igual que sqlite3 tampoco tendría uno significativo
+            # que ofrecer para ese mismo INSERT.
+            #
+            # El intento va dentro de un SAVEPOINT (begin_nested()): en
+            # PostgreSQL, un statement que falla dentro de una transacción
+            # deja TODA la transacción abortada (cualquier consulta
+            # siguiente falla con "current transaction is aborted") hasta
+            # un ROLLBACK -- sin el savepoint, capturar la excepción en
+            # Python no libera ese estado en el servidor, y la siguiente
+            # consulta de quien llama reventaría igualmente aunque no tenga
+            # nada que ver con esta.
+            import sqlalchemy.exc as sa_exc
+
+            try:
+                with conn.begin_nested():
+                    lastval_result = conn.execute(_sqlalchemy_text("SELECT lastval()"))
+                    self._lastrowid = lastval_result.scalar()
+            except sa_exc.OperationalError:
+                pass
 
     def fetchone(self) -> _RowAdapter | None:
         if not self._rows:
@@ -224,9 +276,22 @@ class PostgresConnection:
         self._conn = sa_connection
 
     def execute(self, sql: str, parameters: Sequence[object] = ()) -> PostgresCursor:
+        import sqlalchemy.exc as sa_exc
+
         named_sql, named_params = _translate_qmark_params(sql, parameters)
-        result = self._conn.execute(_sqlalchemy_text(named_sql), named_params)
-        return PostgresCursor(result, self._conn)
+        try:
+            result = self._conn.execute(_sqlalchemy_text(named_sql), named_params)
+        except sa_exc.IntegrityError as exc:
+            # repository.py captura sqlite3.IntegrityError en 21 sitios para
+            # traducir violaciones de restricción a DuplicateError/
+            # ReferenceInUseError -- sqlalchemy.exc.IntegrityError no hereda
+            # de esa clase, así que sin esto ninguno de esos except la
+            # capturaría contra Postgres y el usuario vería la excepción
+            # cruda. str(exc) conserva el mensaje original de Postgres
+            # (incluida la cláusula DETAIL con el nombre de columna), que es
+            # lo que _duplicate_error() inspecciona por substring.
+            raise sqlite3.IntegrityError(str(exc)) from exc
+        return PostgresCursor(result, self._conn, is_insert=_is_insert_statement(sql))
 
     def executescript(self, sql: str) -> None:
         for statement in _split_sql_statements(sql):
@@ -242,6 +307,13 @@ class PostgresConnection:
         self._conn.close()
 
 
+# Sin esto, un host inalcanzable o bloqueado por firewall depende
+# enteramente del timeout TCP por defecto del sistema operativo, que puede
+# tardar mucho más de lo razonable para un botón "Probar conexión" que el
+# usuario espera ver responder en segundos.
+_CONNECT_TIMEOUT_SECONDS = 10
+
+
 def create_postgres_connection(url: str) -> PostgresConnection:
     # Importado aquí, no al nivel de módulo: quien nunca configura
     # PostgreSQL (la mayoría, con SQLite por defecto) no paga el coste de
@@ -249,7 +321,7 @@ def create_postgres_connection(url: str) -> PostgresConnection:
     # puerta de entrada real al camino PostgreSQL.
     import sqlalchemy as sa
 
-    engine = sa.create_engine(url)
+    engine = sa.create_engine(url, connect_args={"connect_timeout": _CONNECT_TIMEOUT_SECONDS})
     return PostgresConnection(engine.connect())
 
 

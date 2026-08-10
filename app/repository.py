@@ -995,8 +995,13 @@ class EmployeeRepository:
         propios datos indefinidamente, y sin self_service_pin_hash guardado
         (el valor por defecto -- nadie lo ha establecido todavía) no hay
         nada contra lo que comparar."""
+        # Sin COLLATE NOCASE aquí a propósito: employees.email ya es
+        # case-insensitive a nivel de esquema (COLLATE NOCASE en SQLite,
+        # CITEXT en Postgres, ver database.py) -- repetirlo en la consulta
+        # es redundante en SQLite e inválido en Postgres (no existe una
+        # colación "nocase" ahí).
         row = self._conn.execute(
-            "SELECT * FROM employees WHERE email = ? COLLATE NOCASE AND active = 1",
+            "SELECT * FROM employees WHERE email = ? AND active = 1",
             (email.strip(),),
         ).fetchone()
         if row is None or row["self_service_pin_hash"] is None:
@@ -1019,9 +1024,15 @@ class EmployeeRepository:
 
         clean_query = query.strip()
         if clean_query:
+            # LOWER() en ambos lados: LIKE es case-insensitive por defecto en
+            # SQLite pero case-sensitive en PostgreSQL -- sin esto, la
+            # búsqueda devolvería menos resultados contra un servidor
+            # PostgreSQL que contra SQLite. LOWER() no toca '%'/'_'/'\\', así
+            # que no interfiere con el escapado de _escape_like().
             clauses.append(
-                "(first_name || ' ' || last_name LIKE ? ESCAPE '\\' "
-                "OR email LIKE ? ESCAPE '\\' OR position LIKE ? ESCAPE '\\')"
+                "(LOWER(first_name || ' ' || last_name) LIKE LOWER(?) ESCAPE '\\' "
+                "OR LOWER(email) LIKE LOWER(?) ESCAPE '\\' "
+                "OR LOWER(position) LIKE LOWER(?) ESCAPE '\\')"
             )
             like_pattern = f"%{_escape_like(clean_query)}%"
             params.extend([like_pattern, like_pattern, like_pattern])
@@ -3751,8 +3762,13 @@ class UserRepository:
         contra datos existentes, no una creación, así que cualquier entrada
         (incluida una con formato inválido) simplemente no encuentra
         coincidencia en vez de lanzar un error distinto que revele por qué."""
+        # Sin COLLATE NOCASE aquí a propósito: users.username ya es
+        # case-insensitive a nivel de esquema (COLLATE NOCASE en SQLite,
+        # CITEXT en Postgres, ver database.py) -- repetirlo en la consulta
+        # es redundante en SQLite e inválido en Postgres (no existe una
+        # colación "nocase" ahí).
         row = self._conn.execute(
-            "SELECT * FROM users WHERE username = ? COLLATE NOCASE",
+            "SELECT * FROM users WHERE username = ?",
             (username.strip(),),
         ).fetchone()
         if row is None:
