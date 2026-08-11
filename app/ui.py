@@ -1149,6 +1149,26 @@ class MainWindow(tk.Tk):
         ).pack(fill="x", padx=10, pady=2)
         ttk.Button(
             sidebar,
+            text="Organigrama",
+            command=self._go_org_chart,
+            style="Sidebar.TButton",
+        ).pack(fill="x", padx=10, pady=2)
+
+        ttk.Separator(sidebar, orient="horizontal", style="Sidebar.TSeparator").pack(
+            fill="x", padx=10, pady=16
+        )
+
+        ttk.Label(sidebar, text="SELECCIÓN Y ALTA", style="SidebarSection.TLabel").pack(
+            anchor="w", padx=10
+        )
+        ttk.Button(
+            sidebar,
+            text="Candidatos",
+            command=self._go_candidates,
+            style="Sidebar.TButton",
+        ).pack(fill="x", padx=10, pady=(4, 2))
+        ttk.Button(
+            sidebar,
             text="Plantillas de documentos...",
             command=self._open_document_template_manager,
             style="Sidebar.TButton",
@@ -1159,25 +1179,20 @@ class MainWindow(tk.Tk):
             command=self._open_onboarding_task_manager,
             style="Sidebar.TButton",
         ).pack(fill="x", padx=10, pady=2)
-        ttk.Button(
-            sidebar,
-            text="Candidatos",
-            command=self._go_candidates,
-            style="Sidebar.TButton",
-        ).pack(fill="x", padx=10, pady=2)
-        ttk.Button(
-            sidebar,
-            text="Organigrama",
-            command=self._go_org_chart,
-            style="Sidebar.TButton",
-        ).pack(fill="x", padx=10, pady=2)
+
         if self._is_admin:
+            ttk.Separator(sidebar, orient="horizontal", style="Sidebar.TSeparator").pack(
+                fill="x", padx=10, pady=16
+            )
+            ttk.Label(sidebar, text="ADMINISTRACIÓN", style="SidebarSection.TLabel").pack(
+                anchor="w", padx=10
+            )
             ttk.Button(
                 sidebar,
                 text="Departamentos",
                 command=self._open_department_manager,
                 style="Sidebar.TButton",
-            ).pack(fill="x", padx=10, pady=2)
+            ).pack(fill="x", padx=10, pady=(4, 2))
             ttk.Button(
                 sidebar,
                 text="Gestionar usuarios...",
