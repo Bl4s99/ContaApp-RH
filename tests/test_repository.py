@@ -27,6 +27,7 @@ from app.repository import (
     ITEpisodeRepository,
     NotFoundError,
     OnboardingTaskRepository,
+    PayrollBulkGenerateResult,
     PayrollRecordRepository,
     PayrollSettingsRepository,
     PayrollSupplementRepository,
@@ -3034,6 +3035,63 @@ class TestPayrollRecordRepository:
         repo.generate(alfa.id, 2026, 3)
         records = repo.list_for_month(2026, 3)
         assert [r.employee_id for r in records] == [alfa.id, zeta.id]
+
+
+class TestPayrollRecordRepositoryGenerateForEmployees:
+    @pytest.fixture()
+    def department_id(self, conn: sqlite3.Connection) -> int:
+        dept = DepartmentRepository(conn).create("Ventas")
+        assert dept.id is not None
+        return dept.id
+
+    @pytest.fixture()
+    def employee_ids(self, conn: sqlite3.Connection, department_id: int) -> list[int]:
+        repo = EmployeeRepository(conn)
+        ids = []
+        for i in range(3):
+            emp = repo.create(
+                make_input(department_id=department_id, email=f"emp{i}@example.com")
+            )
+            assert emp.id is not None
+            ids.append(emp.id)
+        return ids
+
+    def test_generates_for_every_employee_missing_a_record(
+        self, conn: sqlite3.Connection, employee_ids: list[int]
+    ) -> None:
+        result = PayrollRecordRepository(conn).generate_for_employees(employee_ids, 2026, 3)
+        assert result == PayrollBulkGenerateResult(generated=3, skipped=0)
+        for employee_id in employee_ids:
+            assert PayrollRecordRepository(conn).get(employee_id, 2026, 3) is not None
+
+    def test_skips_and_does_not_touch_an_employee_that_already_has_one(
+        self, conn: sqlite3.Connection, employee_ids: list[int]
+    ) -> None:
+        repo = PayrollRecordRepository(conn)
+        repo.generate(employee_ids[0], 2026, 3, irpf_pct_override=22.5)
+
+        result = repo.generate_for_employees(employee_ids, 2026, 3)
+
+        assert result == PayrollBulkGenerateResult(generated=2, skipped=1)
+        untouched = repo.get(employee_ids[0], 2026, 3)
+        assert untouched is not None
+        assert untouched.payroll.irpf_pct == 22.5
+
+    def test_empty_list_returns_zero_counts(self, conn: sqlite3.Connection) -> None:
+        result = PayrollRecordRepository(conn).generate_for_employees([], 2026, 3)
+        assert result == PayrollBulkGenerateResult(generated=0, skipped=0)
+
+    def test_a_deleted_employee_id_counts_as_skipped_not_an_error(
+        self, conn: sqlite3.Connection, employee_ids: list[int]
+    ) -> None:
+        # Simula que otra sesión borró a un empleado entre que la lista se
+        # mostró en pantalla (PayrollPage._employees) y el clic en "Generar
+        # nóminas de todos" -- no debe abortar el resto del lote.
+        EmployeeRepository(conn).delete(employee_ids[1])
+
+        result = PayrollRecordRepository(conn).generate_for_employees(employee_ids, 2026, 3)
+
+        assert result == PayrollBulkGenerateResult(generated=2, skipped=1)
 
 
 class TestPayrollSupplementRepository:

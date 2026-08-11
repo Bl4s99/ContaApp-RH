@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os as os
+import tempfile as tempfile
 import tkinter as tk
 from collections.abc import Callable
 from datetime import date, datetime, timedelta
@@ -27,6 +29,30 @@ def _format_currency(value: float) -> str:
     integer_part, decimal_part = us_formatted.split(".")
     integer_part = integer_part.replace(",", ".")
     return f"{integer_part},{decimal_part} €"
+
+
+def _cleanup_stale_print_files(directory: Path, max_age_seconds: float = 3600) -> None:
+    """Best-effort: borra ficheros de `directory` con más de max_age_seconds
+    de antigüedad. Se llama justo antes de escribir un PDF nuevo para
+    imprimir (_handle_print_pdf) -- no se puede borrar el PDF recién escrito
+    justo después de os.startfile(..., "print") porque esa llamada es
+    asíncrona (el visor de PDF puede seguir leyéndolo un rato); dejarlo para
+    siempre en el temporal compartido del sistema tampoco vale, porque
+    acumula nóminas reales (salario, DNI, número de SS) indefinidamente.
+    Cada fichero se intenta borrar por separado -- si uno sigue abierto por
+    un visor (justo el caso que esto existe para tolerar) no debe impedir
+    limpiar el resto."""
+    try:
+        entries = list(directory.iterdir())
+    except OSError:
+        return
+    cutoff = datetime.now().timestamp() - max_age_seconds
+    for entry in entries:
+        try:
+            if entry.is_file() and entry.stat().st_mtime < cutoff:
+                entry.unlink()
+        except OSError:
+            continue
 
 
 DISCLAIMER_TEXT = (
@@ -683,6 +709,18 @@ class PayrollPage(ttk.Frame):
             command=self._handle_gestoria_export,
         )
         self.gestoria_export_button.pack(side="left", padx=(6, 0))
+        # Sin restringir a administradores, por el mismo motivo que
+        # generate_button/download_pdf_button más abajo: como solo puede
+        # CREAR nóminas que faltan (nunca sobrescribe una ya generada), el
+        # resultado final es idéntico a que un encargado pulsase "Generar
+        # nómina de este mes" una vez por cada empleado de su departamento
+        # -- no es una acción financiera de toda la empresa como SEPA.
+        self.generate_all_button = ttk.Button(
+            actions_row,
+            text="Generar nóminas de todos...",
+            command=self._handle_generate_all,
+        )
+        self.generate_all_button.pack(side="left", padx=(6, 0))
         if not self._is_admin:
             self.settings_button.state(["disabled"])
             self.sepa_export_button.state(["disabled"])
@@ -711,6 +749,10 @@ class PayrollPage(ttk.Frame):
             status_row, text="Descargar PDF...", command=self._handle_download_pdf
         )
         self.download_pdf_button.pack(side="left", padx=(6, 0))
+        self.print_button = ttk.Button(
+            status_row, text="Imprimir", command=self._handle_print_pdf
+        )
+        self.print_button.pack(side="left", padx=(6, 0))
 
         self.breakdown_frame = ttk.Frame(detail_frame)
         self.breakdown_frame.pack(side="top", anchor="w", fill="x")
@@ -885,6 +927,35 @@ class PayrollPage(ttk.Frame):
             "Exportar para gestoría", f"{len(rows)} nómina(s) exportada(s).", parent=self
         )
 
+    def _handle_generate_all(self) -> None:
+        if not self._employees:
+            messagebox.showinfo(
+                "Generar nóminas de todos",
+                "No hay ningún empleado en la vista actual.",
+                parent=self,
+            )
+            return
+        scope = self.department_filter_var.get() or "Todos"
+        if not messagebox.askyesno(
+            "Generar nóminas de todos",
+            f"Se va a generar la nómina de {MONTH_NAMES[self._view_month - 1]} "
+            f"{self._view_year} para {len(self._employees)} empleado(s) de "
+            f'"{scope}".\n\nSe usará la estimación automática de IRPF; las que '
+            "ya existan para este mes no se tocan.",
+            parent=self,
+        ):
+            return
+        result = self._repos.payroll_records.generate_for_employees(
+            [e.id for e in self._employees if e.id is not None],
+            self._view_year,
+            self._view_month,
+        )
+        summary = f"Se generaron {result.generated} nómina(s)."
+        if result.skipped:
+            summary += f"\nSe omitieron {result.skipped} porque ya existían."
+        messagebox.showinfo("Generar nóminas de todos", summary, parent=self)
+        self._render_breakdown()
+
     def _render_breakdown(self) -> None:
         self.month_label.configure(
             text=f"{MONTH_NAMES[self._view_month - 1]} {self._view_year}"
@@ -898,6 +969,7 @@ class PayrollPage(ttk.Frame):
             self.record_status_label.configure(text="")
             self.generate_button.state(["disabled"])
             self.download_pdf_button.state(["disabled"])
+            self.print_button.state(["disabled"])
             ttk.Label(
                 self.breakdown_frame,
                 text="Elige un empleado de la lista para ver su nómina.",
@@ -920,6 +992,7 @@ class PayrollPage(ttk.Frame):
             )
             self.generate_button.configure(text="Regenerar nómina de este mes...")
             self.download_pdf_button.state(["!disabled"])
+            self.print_button.state(["!disabled"])
             # El salario/hijos a cargo mostrados deben ser los CONGELADOS
             # en el snapshot, no los actuales del empleado -- si su sueldo
             # cambió después de generar esta nómina, mostrar el actual aquí
@@ -934,9 +1007,10 @@ class PayrollPage(ttk.Frame):
         else:
             self.record_status_label.configure(text="Aún no se ha generado la nómina de este mes (estimación en vivo).")
             self.generate_button.configure(text="Generar nómina de este mes")
-            # Nunca se descarga un PDF de una estimación en vivo -- mismo
-            # criterio que SepaExportDialog ya documenta para sí mismo.
+            # Nunca se descarga/imprime un PDF de una estimación en vivo --
+            # mismo criterio que SepaExportDialog ya documenta para sí misma.
             self.download_pdf_button.state(["disabled"])
+            self.print_button.state(["disabled"])
             settings = self._repos.payroll_settings.get()
             supplements_total, advances_total = self._repos.payroll_supplements.totals_for_employee_month(
                 employee.id, self._view_year, self._view_month
@@ -972,38 +1046,9 @@ class PayrollPage(ttk.Frame):
         employee = self._selected_employee
         if employee is None:
             return
-        assert employee.id is not None
-        record = self._repos.payroll_records.get(employee.id, self._view_year, self._view_month)
-        if record is None:
-            messagebox.showinfo(
-                "Descargar PDF", "Genera primero la nómina de este mes.", parent=self
-            )
+        pdf_bytes = self._build_selected_pdf_bytes(employee, action_title="Descargar PDF")
+        if pdf_bytes is None:
             return
-        department = self._repos.departments.get(employee.department_id)
-        professional_category = (
-            self._repos.professional_categories.get(employee.professional_category_id)
-            if employee.professional_category_id is not None
-            else None
-        )
-        supplements = self._repos.payroll_supplements.list_for_employee_month(
-            employee.id, self._view_year, self._view_month
-        )
-        company = CompanyInfo(
-            name=self._repos.app_settings.get_company_name(),
-            nif=self._repos.app_settings.get_company_nif(),
-            ccc=self._repos.app_settings.get_company_ccc(),
-            address=self._repos.app_settings.get_company_address(),
-        )
-        pdf_bytes = build_payroll_pdf(
-            employee=employee,
-            department_name=department.name,
-            professional_category_name=(
-                professional_category.name if professional_category is not None else None
-            ),
-            company=company,
-            record=record,
-            supplements=supplements,
-        )
         path_str = filedialog.asksaveasfilename(
             title="Guardar nómina en PDF",
             defaultextension=".pdf",
@@ -1022,6 +1067,71 @@ class PayrollPage(ttk.Frame):
             messagebox.showerror("Descargar PDF", str(exc), parent=self)
             return
         messagebox.showinfo("Descargar PDF", "PDF generado correctamente.", parent=self)
+
+    def _handle_print_pdf(self) -> None:
+        employee = self._selected_employee
+        if employee is None:
+            return
+        pdf_bytes = self._build_selected_pdf_bytes(employee, action_title="Imprimir")
+        if pdf_bytes is None:
+            return
+        directory = Path(tempfile.gettempdir()) / "contaapp_rh_print"
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+            _cleanup_stale_print_files(directory)
+            temp_path = directory / (
+                f"nomina_{employee.full_name.replace(' ', '_')}_"
+                f"{self._view_year}{self._view_month:02d}_{datetime.now():%H%M%S%f}.pdf"
+            )
+            temp_path.write_bytes(pdf_bytes)
+        except OSError as exc:
+            messagebox.showerror("Imprimir", str(exc), parent=self)
+            return
+        try:
+            os.startfile(temp_path, "print")
+        except OSError as exc:
+            messagebox.showerror(
+                "Imprimir",
+                "No se pudo imprimir. Puede que no haya ninguna aplicación configurada "
+                f"para abrir archivos PDF en este equipo.\n\nDetalle técnico: {exc}",
+                parent=self,
+            )
+            return
+        messagebox.showinfo("Imprimir", "La nómina se ha enviado a imprimir.", parent=self)
+
+    def _build_selected_pdf_bytes(self, employee: Employee, *, action_title: str) -> bytes | None:
+        assert employee.id is not None
+        record = self._repos.payroll_records.get(employee.id, self._view_year, self._view_month)
+        if record is None:
+            messagebox.showinfo(
+                action_title, "Genera primero la nómina de este mes.", parent=self
+            )
+            return None
+        department = self._repos.departments.get(employee.department_id)
+        professional_category = (
+            self._repos.professional_categories.get(employee.professional_category_id)
+            if employee.professional_category_id is not None
+            else None
+        )
+        supplements = self._repos.payroll_supplements.list_for_employee_month(
+            employee.id, self._view_year, self._view_month
+        )
+        company = CompanyInfo(
+            name=self._repos.app_settings.get_company_name(),
+            nif=self._repos.app_settings.get_company_nif(),
+            ccc=self._repos.app_settings.get_company_ccc(),
+            address=self._repos.app_settings.get_company_address(),
+        )
+        return build_payroll_pdf(
+            employee=employee,
+            department_name=department.name,
+            professional_category_name=(
+                professional_category.name if professional_category is not None else None
+            ),
+            company=company,
+            record=record,
+            supplements=supplements,
+        )
 
     def _refresh_history(self) -> None:
         self.history_tree.delete(*self.history_tree.get_children())

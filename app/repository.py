@@ -150,6 +150,12 @@ class MarkRangeResult:
 
 
 @dataclass(frozen=True, slots=True)
+class PayrollBulkGenerateResult:
+    generated: int
+    skipped: int
+
+
+@dataclass(frozen=True, slots=True)
 class _ValidatedEmployee:
     first_name: str
     last_name: str
@@ -3386,6 +3392,37 @@ class PayrollRecordRepository:
             (employee_id, year, month),
         ).fetchone()
         return _row_to_payroll_record(row) if row is not None else None
+
+    def generate_for_employees(
+        self, employee_ids: Sequence[int], year: int, month: int
+    ) -> PayrollBulkGenerateResult:
+        """Genera la nómina automática (sin irpf_pct_override) de year/month
+        para cada id de employee_ids que TODAVÍA no tenga una ya generada
+        para ese mes; si ya existe, se omite sin tocarla -- puede tener un %
+        de IRPF puesto a mano por GeneratePayrollDialog que no debe
+        descartarse en silencio.
+
+        Cada empleado se procesa de forma independiente -- generate() hace
+        su propio commit por dentro, así que envolver este bucle en un with
+        transaction() exterior no daría atomicidad real (nada que deshacer,
+        ya se ha comprometido) y un fallo a mitad de la lista no afecta a lo
+        ya generado para los anteriores. Un id que ya no exista (borrado por
+        otra sesión desde que se leyó la lista mostrada en pantalla -- mismo
+        escenario que ya contempla reload_departments()) cuenta como
+        omitido, no como error."""
+        generated = 0
+        skipped = 0
+        for employee_id in employee_ids:
+            if self.get(employee_id, year, month) is not None:
+                skipped += 1
+                continue
+            try:
+                self.generate(employee_id, year, month)
+            except NotFoundError:
+                skipped += 1
+                continue
+            generated += 1
+        return PayrollBulkGenerateResult(generated=generated, skipped=skipped)
 
     def list_for_employee(self, employee_id: int) -> list[PayrollRecord]:
         rows = self._conn.execute(
