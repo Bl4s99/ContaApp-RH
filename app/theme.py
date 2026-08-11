@@ -24,6 +24,8 @@ class Palette:
     sidebar_separator: str
     disclaimer_bg: str
     disclaimer_fg: str
+    alert_bg: str
+    alert_fg: str
     heading_text: str
 
 
@@ -48,6 +50,11 @@ LIGHT = Palette(
     sidebar_separator="#2f5678",
     disclaimer_bg="#fdf3cd",
     disclaimer_fg="#7a5b00",
+    # Familia de "danger" (no del amarillo de disclaimer_*, que significa
+    # otra cosa: "esta cifra es una estimación") -- para el banner de
+    # alertas de Inicio. Contraste 8.33:1.
+    alert_bg="#fbe1de",
+    alert_fg="#7a1f14",
     # Mismo tono que primary_dark en claro (a propósito -- aquí SÍ funciona
     # como texto, por el contraste con bg claro), pero es un campo aparte
     # porque en oscuro NO puede reutilizar primary_dark: ese valor se vuelve
@@ -76,6 +83,11 @@ DARK = Palette(
     sidebar_separator="#080a0e",
     disclaimer_bg="#3d3115",
     disclaimer_fg="#f2cf6b",
+    # Igual que en claro: familia de "danger", no del amarillo de
+    # disclaimer_*. Oscurecido y desaturado en vez de invertido (mismo
+    # criterio que el resto de esta paleta oscura). Contraste 6.85:1.
+    alert_bg="#361712",
+    alert_fg="#f48b7b",
     # primary_dark ("#10131a") es casi negro en este modo -- correcto como
     # fondo fijo de la barra lateral, ilegible como texto sobre bg/surface
     # (también oscuros). primary_light da el mismo peso visual de "titular
@@ -278,6 +290,26 @@ def apply_theme(root: tk.Tk, mode: str = "light") -> None:
         font=("TkDefaultFont", 22, "bold"),
     )
     style.configure("CardCaption.TLabel", background=p.surface, foreground=p.text_muted)
+
+    # Variante de aviso de las tarjetas de arriba (reutiliza disclaimer_bg/
+    # disclaimer_fg, no alert_bg/alert_fg -- misma familia visual que el
+    # resto de avisos de nómina, ver welcome_page.py).
+    style.configure(
+        "CardWarning.TFrame",
+        background=p.disclaimer_bg,
+        bordercolor=p.disclaimer_fg,
+        relief="solid",
+        borderwidth=1,
+    )
+    style.configure(
+        "CardWarningValue.TLabel",
+        background=p.disclaimer_bg,
+        foreground=p.disclaimer_fg,
+        font=("TkDefaultFont", 22, "bold"),
+    )
+    style.configure(
+        "CardWarningCaption.TLabel", background=p.disclaimer_bg, foreground=p.disclaimer_fg
+    )
 
     style.configure(
         "PageHeading.TLabel", background=p.bg, foreground=p.heading_text, font=_HEADING_FONT

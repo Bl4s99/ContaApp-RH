@@ -8,12 +8,6 @@ from datetime import date, datetime
 from tkinter import messagebox
 from types import TracebackType
 
-from app.alerts import (
-    all_alerts,
-    professional_category_minimum_salary_alerts,
-    retention_review_alerts,
-    training_expiry_alerts,
-)
 from app.backup import BackupRepository, apply_pending_restore
 from app.crash_report import notify_recipients_in_background
 from app.database import DEFAULT_DB_PATH, get_connection, init_db
@@ -24,7 +18,7 @@ from app.logging_config import (
     install_tk_exception_hook,
     log_uncaught_exception,
 )
-from app.repository import Repositories
+from app.repository import Repositories, gather_alerts
 from app.setup_wizard import SetupWizard
 from app.ui import MainWindow
 from app.update_check import UpdateInfo, check_for_update
@@ -137,20 +131,7 @@ def main() -> None:
                 locked_department_id = (
                     current_user.department_id if current_user.role == "encargado" else None
                 )
-                # Sin active_only: all_alerts() ya se autolimita a activos y
-                # retention_review_alerts() a inactivos (ver alerts_ui.py).
-                employees = repos.employees.search(department_id=locked_department_id)
-                today = date.today()
-                retention_years = repos.app_settings.get_data_retention_years()
-                trainings = repos.trainings.list_all()
-                categories = repos.professional_categories.list_all()
-                alerts = sorted(
-                    all_alerts(employees, today)
-                    + retention_review_alerts(employees, today, retention_years)
-                    + training_expiry_alerts(employees, trainings, today)
-                    + professional_category_minimum_salary_alerts(employees, categories, today),
-                    key=lambda a: a.target_date,
-                )
+                alerts = gather_alerts(repos, locked_department_id, date.today())
                 send_digest_email(connection, alerts)
                 repos.users.mark_digest_sent(current_user.id, datetime.now())
             except (smtplib.SMTPException, OSError) as exc:

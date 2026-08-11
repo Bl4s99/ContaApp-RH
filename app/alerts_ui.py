@@ -5,14 +5,8 @@ from datetime import date
 from tkinter import ttk
 
 from app import theme
-from app.alerts import (
-    DEFAULT_ALERT_WINDOW_DAYS,
-    all_alerts,
-    professional_category_minimum_salary_alerts,
-    retention_review_alerts,
-    training_expiry_alerts,
-)
-from app.repository import Repositories
+from app.alerts import DEFAULT_ALERT_WINDOW_DAYS
+from app.repository import Repositories, gather_alerts
 
 _CATEGORY_LABELS = {
     "contrato": "Contrato",
@@ -81,26 +75,7 @@ class AlertsPage(ttk.Frame):
 
     def refresh(self) -> None:
         self.tree.delete(*self.tree.get_children())
-        # Sin active_only: las tres alertas "clásicas" se autolimitan a
-        # empleados activos y retention_review_alerts() a los inactivos, así
-        # que una sola consulta con todos sirve para las cuatro categorías.
-        employees = self._repos.employees.search(department_id=self._locked_department_id)
-        today = date.today()
-        retention_years = self._repos.app_settings.get_data_retention_years()
-        # trainings sin acotar por departamento -- training_expiry_alerts()
-        # ya descarta las que no pertenecen a `employees` (ver su docstring).
-        trainings = self._repos.trainings.list_all()
-        # Igual que trainings: el catálogo de categorías no se acota por
-        # departamento, professional_category_minimum_salary_alerts() ya
-        # descarta lo que no pertenece a `employees`.
-        categories = self._repos.professional_categories.list_all()
-        alerts = sorted(
-            all_alerts(employees, today)
-            + retention_review_alerts(employees, today, retention_years)
-            + training_expiry_alerts(employees, trainings, today)
-            + professional_category_minimum_salary_alerts(employees, categories, today),
-            key=lambda a: a.target_date,
-        )
+        alerts = gather_alerts(self._repos, self._locked_department_id, date.today())
         for idx, alert in enumerate(alerts):
             self.tree.insert(
                 "",

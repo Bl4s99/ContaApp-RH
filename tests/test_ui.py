@@ -11,6 +11,7 @@ import pytest
 
 from app import ui
 from app.backup import BackupRepository
+from app.models import Department
 from app.repository import Repositories
 from app.ui import BackupManagerDialog
 
@@ -115,3 +116,51 @@ class TestShowPageGridManagement:
         ui.MainWindow._show_page(fake_window, "b")
         assert pages["b"].grid_info()
         assert not pages["a"].grid_info()
+
+
+class TestGoCalendar:
+    # No hay un botón "Calendario" genérico en la barra lateral -- solo uno
+    # por departamento -- así que _go_calendar() elige el primero de
+    # _visible_departments() (el propio departamento para un encargado, o
+    # la lista completa para un admin). Mismo patrón de SimpleNamespace +
+    # método real sin vincular que TestShowPageGridManagement, por el mismo
+    # motivo (ver el comentario de esa clase): una MainWindow real rompe la
+    # carga de PhotoImage en los tests.
+    def _fake_window(
+        self, departments: list[Department], locked_department_id: int | None
+    ) -> tuple[SimpleNamespace, list[Department]]:
+        calls: list[Department] = []
+        fake = SimpleNamespace(
+            _departments=departments,
+            _locked_department_id=locked_department_id,
+            _show_department_calendar=lambda d: calls.append(d),
+        )
+        fake._visible_departments = lambda: ui.MainWindow._visible_departments(
+            fake  # type: ignore[arg-type]
+        )
+        return fake, calls
+
+    def test_admin_picks_the_first_visible_department(self) -> None:
+        dept_a = Department(id=1, name="Ventas")
+        dept_b = Department(id=2, name="Producción")
+        fake, calls = self._fake_window([dept_a, dept_b], locked_department_id=None)
+
+        ui.MainWindow._go_calendar(fake)  # type: ignore[arg-type]
+
+        assert calls == [dept_a]
+
+    def test_encargado_picks_their_own_locked_department(self) -> None:
+        dept_a = Department(id=1, name="Ventas")
+        dept_b = Department(id=2, name="Producción")
+        fake, calls = self._fake_window([dept_a, dept_b], locked_department_id=2)
+
+        ui.MainWindow._go_calendar(fake)  # type: ignore[arg-type]
+
+        assert calls == [dept_b]
+
+    def test_admin_with_no_departments_is_a_noop(self) -> None:
+        fake, calls = self._fake_window([], locked_department_id=None)
+
+        ui.MainWindow._go_calendar(fake)  # type: ignore[arg-type]
+
+        assert calls == []

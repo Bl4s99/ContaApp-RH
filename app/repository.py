@@ -10,6 +10,14 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
 from app import validation
+from app.alerts import (
+    Alert,
+    DEFAULT_ALERT_WINDOW_DAYS,
+    all_alerts,
+    professional_category_minimum_salary_alerts,
+    retention_review_alerts,
+    training_expiry_alerts,
+)
 from app.database import DEFAULT_SS_EMPLOYEE_PCT, DEFAULT_SS_EMPLOYER_PCT, transaction
 from app.db_engine import DbConnection
 from app.document_templates import build_placeholder_values, render_document_template
@@ -4283,6 +4291,34 @@ class AppSettingsRepository:
                 "UPDATE app_settings SET last_update_check_at = ? WHERE id = 1",
                 (value.isoformat(timespec="seconds"),),
             )
+
+
+def gather_alerts(
+    repos: Repositories,
+    department_id: int | None,
+    today: date,
+    within_days: int = DEFAULT_ALERT_WINDOW_DAYS,
+) -> list[Alert]:
+    """Junta las 7 categorías de alerta (ver alerts.py) a partir de los
+    datos ya persistidos -- punto único para que AlertsPage.refresh(), el
+    resumen semanal de main.py y WelcomePage.refresh() no puedan divergir
+    silenciosamente en esta secuencia, antes duplicada byte a byte en las
+    dos primeras. department_id es obligatorio (a diferencia de
+    monthly_totals()/CandidateRepository.list_all(), que lo hacen
+    opcional): esta función alimenta pantallas sensibles a departamento,
+    así que un llamador debe elegir conscientemente None (toda la
+    empresa) en vez de caer en ello por omitir el argumento."""
+    employees = repos.employees.search(department_id=department_id)
+    retention_years = repos.app_settings.get_data_retention_years()
+    trainings = repos.trainings.list_all()
+    categories = repos.professional_categories.list_all()
+    return sorted(
+        all_alerts(employees, today, within_days)
+        + retention_review_alerts(employees, today, retention_years, within_days)
+        + training_expiry_alerts(employees, trainings, today, within_days)
+        + professional_category_minimum_salary_alerts(employees, categories, today),
+        key=lambda a: a.target_date,
+    )
 
 
 @dataclass(frozen=True, slots=True)

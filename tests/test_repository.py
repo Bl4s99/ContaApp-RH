@@ -36,10 +36,12 @@ from app.repository import (
     ProfessionalCategoryInput,
     ProfessionalCategoryRepository,
     ReferenceInUseError,
+    Repositories,
     RepositoryError,
     SeveranceSettlementRepository,
     UserRepository,
     WorkAccidentRepository,
+    gather_alerts,
 )
 from app.severance import SeveranceCalculation, calculate_severance
 
@@ -4541,3 +4543,118 @@ class TestAssignedEquipmentRepository:
         EmployeeRepository(conn).delete(employee_id)
         with pytest.raises(NotFoundError):
             repo.get(equipment.id)
+
+
+class TestGatherAlerts:
+    # Único punto de la suite que usa la fachada Repositories.create(conn)
+    # en vez de instanciar repositorios sueltos -- gather_alerts() exige la
+    # fachada completa (orquesta 4 repos + las funciones puras de
+    # alerts.py), a diferencia del resto de esta clase.
+    def _department(self, repos: Repositories, name: str) -> int:
+        dept = repos.departments.create(name)
+        assert dept.id is not None
+        return dept.id
+
+    def _employee_with_contract_ending_soon(
+        self, repos: Repositories, department_id: int, email: str, in_days: int
+    ) -> int:
+        emp = repos.employees.create(
+            EmployeeInput(
+                first_name="Ana", last_name="Lopez", email=email, phone="",
+                position="Comercial", department_id=department_id, salary=24000.0,
+                hire_date="2020-01-01",
+                # Solo un contrato Temporal puede tener fecha de fin -- un
+                # Indefinido (el valor por defecto) la rechaza en validación.
+                contract_type="Temporal",
+                contract_end_date=(date.today() + timedelta(days=in_days)).isoformat(),
+                # Sin esto, formacion_prl_alerts() dispararía su propia
+                # alerta (se activa cuando NO se ha rellenado, ver el otro
+                # comentario sobre esto más abajo) y contaminaría los
+                # recuentos exactos de estos tests.
+                prl_training_date="2020-01-01",
+            )
+        )
+        assert emp.id is not None
+        return emp.id
+
+    def _employee_with_birthday_soon(
+        self, repos: Repositories, department_id: int, email: str, in_days: int
+    ) -> int:
+        birthday = date.today() + timedelta(days=in_days)
+        emp = repos.employees.create(
+            EmployeeInput(
+                first_name="Luis", last_name="Perez", email=email, phone="",
+                position="Operario", department_id=department_id, salary=22000.0,
+                hire_date="2020-01-01",
+                birth_date=date(1990, birthday.month, birthday.day).isoformat(),
+                prl_training_date="2020-01-01",
+            )
+        )
+        assert emp.id is not None
+        return emp.id
+
+    def test_combines_contract_and_birthday_categories(self, conn: sqlite3.Connection) -> None:
+        repos = Repositories.create(conn)
+        dept = self._department(repos, "Ventas")
+        self._employee_with_contract_ending_soon(repos, dept, "ana@example.com", 5)
+        self._employee_with_birthday_soon(repos, dept, "luis@example.com", 10)
+
+        alerts = gather_alerts(repos, None, date.today())
+
+        categories = {a.category for a in alerts}
+        assert "contrato" in categories
+        assert "cumpleanos" in categories
+
+    def test_department_id_excludes_other_departments(self, conn: sqlite3.Connection) -> None:
+        repos = Repositories.create(conn)
+        ventas = self._department(repos, "Ventas")
+        produccion = self._department(repos, "Producción")
+        self._employee_with_contract_ending_soon(repos, ventas, "ana@example.com", 5)
+        self._employee_with_contract_ending_soon(repos, produccion, "luis@example.com", 5)
+
+        alerts = gather_alerts(repos, ventas, date.today())
+
+        assert len(alerts) == 1
+        assert alerts[0].employee_name == "Ana Lopez"
+
+    def test_department_id_none_is_company_wide(self, conn: sqlite3.Connection) -> None:
+        repos = Repositories.create(conn)
+        ventas = self._department(repos, "Ventas")
+        produccion = self._department(repos, "Producción")
+        self._employee_with_contract_ending_soon(repos, ventas, "ana@example.com", 5)
+        self._employee_with_contract_ending_soon(repos, produccion, "luis@example.com", 5)
+
+        alerts = gather_alerts(repos, None, date.today())
+
+        assert len(alerts) == 2
+
+    def test_sorted_by_target_date_across_categories(self, conn: sqlite3.Connection) -> None:
+        repos = Repositories.create(conn)
+        dept = self._department(repos, "Ventas")
+        # El cumpleaños cae antes que el vencimiento del contrato -- el
+        # resultado debe venir ordenado por fecha, no agrupado por
+        # categoría (contrato antes que cumpleaños en el propio código de
+        # gather_alerts, pero eso no debe filtrarse al orden final).
+        self._employee_with_contract_ending_soon(repos, dept, "ana@example.com", 20)
+        self._employee_with_birthday_soon(repos, dept, "luis@example.com", 3)
+
+        alerts = gather_alerts(repos, None, date.today())
+
+        assert [a.category for a in alerts] == ["cumpleanos", "contrato"]
+
+    def test_no_alerts_returns_empty_list(self, conn: sqlite3.Connection) -> None:
+        repos = Repositories.create(conn)
+        dept = self._department(repos, "Ventas")
+        repos.employees.create(
+            EmployeeInput(
+                first_name="Ana", last_name="Lopez", email="ana@example.com", phone="",
+                position="Comercial", department_id=dept, salary=24000.0,
+                hire_date="2020-01-01",
+                # formacion_prl se dispara cuando NO se ha rellenado (a
+                # diferencia de las demás, que avisan de una fecha
+                # próxima) -- hay que fijarla para que este empleado
+                # quede genuinamente sin alertas.
+                prl_training_date="2020-01-01",
+            )
+        )
+        assert gather_alerts(repos, None, date.today()) == []

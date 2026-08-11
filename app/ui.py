@@ -1087,6 +1087,10 @@ class MainWindow(tk.Tk):
             on_go_payroll=lambda: self._show_page("nominas"),
             on_go_departments=self._open_department_manager,
             on_export=self._handle_export,
+            on_go_calendar=self._go_calendar,
+            on_go_alerts=self._go_alerts,
+            on_go_org_chart=self._go_org_chart,
+            on_go_candidates=self._go_candidates,
             is_admin=self._is_admin,
             locked_department_id=self._locked_department_id,
         )
@@ -1342,6 +1346,20 @@ class MainWindow(tk.Tk):
         self._org_chart_page.refresh()
         self._show_page("organigrama")
 
+    def _go_calendar(self) -> None:
+        # No hay un botón "Calendario" genérico -- solo uno por
+        # departamento (ver _rebuild_calendar_sidebar), y CalendarPage no
+        # dibuja nada hasta que show_department()/show_employee() se llama
+        # una vez. Se reutiliza _visible_departments() (el propio
+        # departamento de un encargado, o la lista completa para un admin)
+        # y se toma el primero -- el mismo que ya aparece primero en la
+        # barra lateral. Sin ningún departamento visible (solo alcanzable
+        # si un admin borra el último), no hace nada.
+        department = next(iter(self._visible_departments()), None)
+        if department is None:
+            return
+        self._show_department_calendar(department)
+
     def _handle_theme_toggle(self, is_dark: bool) -> None:
         new_mode = "dark" if is_dark else "light"
         self._repos.app_settings.set_theme_mode(new_mode)
@@ -1355,6 +1373,7 @@ class MainWindow(tk.Tk):
         self._payroll_page.apply_theme_change()
         self._alerts_page.apply_theme_change()
         self._employee_page.apply_theme_change()
+        self._welcome_page.apply_theme_change()
         palette = theme.current()
         self._theme_toggle.set_colors(
             bg=palette.primary_dark,
