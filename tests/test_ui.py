@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import inspect
 import sqlite3
 import tkinter as tk
 from pathlib import Path
+from tkinter import ttk
+from types import SimpleNamespace
 
 import pytest
 
+from app import ui
 from app.backup import BackupRepository
 from app.repository import Repositories
 from app.ui import BackupManagerDialog
@@ -62,3 +66,52 @@ class TestBackupManagerDialogErrorHandling:
 
         assert "No se pudo preparar la restauración" in dialog.error_label.cget("text")
         dialog.destroy()
+
+
+class TestMainWindowStartupOrder:
+    def test_center_window_is_called_after_build_layout_in_source_order(self) -> None:
+        # Regresión: center_window() llama a update_idletasks(), que mapea
+        # la ventana en pantalla -- si eso ocurre ANTES de _build_layout()
+        # (que construye la barra lateral y las 10 páginas, varias con sus
+        # propias consultas a BD en su __init__), el usuario ve una ventana
+        # vacía durante toda esa construcción, como un parpadeo negro al
+        # arrancar. LoginWindow ya centra al final por el mismo motivo.
+        #
+        # No se instancia una MainWindow real aquí: un segundo tk.Tk() real
+        # dentro del mismo proceso que el tk_root de sesión rompe la carga
+        # de imágenes de EmployeePage (PhotoImage se crea contra el
+        # intérprete Tcl equivocado -- error "image ... doesn't exist", un
+        # artefacto de tener dos intérpretes Tcl a la vez en tests, no un
+        # bug real de la app, que en uso normal solo tiene una MainWindow).
+        # Se comprueba el orden real de las dos llamadas en el código fuente
+        # en su lugar.
+        source = inspect.getsource(ui.MainWindow.__init__)
+        build_layout_pos = source.index("self._build_layout()")
+        center_window_pos = source.index("center_window(self)")
+        assert build_layout_pos < center_window_pos
+
+
+class TestShowPageGridManagement:
+    def test_switching_pages_removes_the_previous_one_from_grid(
+        self, tk_root: tk.Tk
+    ) -> None:
+        # Regresión: tkraise() por sí solo cambia el orden de apilado pero
+        # no saca a las páginas no visibles de la gestión de geometría --
+        # las 10 páginas seguían todas grid()-eadas a la vez, así que cada
+        # resize de la ventana recalculaba la geometría de las 10 en vez de
+        # solo la visible. Se llama a _show_page() (método real, sin
+        # mockear) sobre un objeto mínimo con solo el atributo _pages que
+        # necesita, en vez de una MainWindow completa -- ver el comentario
+        # en TestMainWindowStartupOrder sobre por qué evitar eso aquí.
+        pages = {"a": ttk.Frame(tk_root), "b": ttk.Frame(tk_root)}
+        fake_window = SimpleNamespace(_pages=pages)
+
+        # SimpleNamespace no es una MainWindow real -- basta con que tenga
+        # el atributo _pages que _show_page() de verdad usa.
+        ui.MainWindow._show_page(fake_window, "a")  # type: ignore[arg-type]
+        assert pages["a"].grid_info()
+        assert not pages["b"].grid_info()
+
+        ui.MainWindow._show_page(fake_window, "b")
+        assert pages["b"].grid_info()
+        assert not pages["a"].grid_info()

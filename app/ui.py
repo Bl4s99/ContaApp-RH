@@ -1009,13 +1009,20 @@ class MainWindow(tk.Tk):
         self.title("ContaApp RH")
         self.geometry("1200x680")
         self.minsize(1000, 580)
-        center_window(self)
 
         self._departments: list[Department] = []
 
         self._build_layout()
         self._reload_departments()
         self._show_page("inicio")
+        # Centrar AL FINAL, no antes de _build_layout(): center_window()
+        # llama a update_idletasks(), que mapea la ventana en pantalla --
+        # hacerlo antes de construir la barra lateral y las 10 páginas
+        # (varias con sus propias consultas a BD en su __init__) dejaba una
+        # ventana vacía visible durante toda esa construcción, como un
+        # parpadeo negro al arrancar. LoginWindow ya centra al final por el
+        # mismo motivo.
+        center_window(self)
 
     def _build_layout(self) -> None:
         # Panedwindow (no pack de ancho fijo) para que el usuario pueda
@@ -1095,8 +1102,9 @@ class MainWindow(tk.Tk):
             "solicitudes": self._absence_requests_page,
             "alertas": self._alerts_page,
         }
-        for page in self._pages.values():
-            page.grid(row=0, column=0, sticky="nsew")
+        # No se grid()-ean aquí todas a la vez: _show_page() se encarga de
+        # gestionar con grid()/grid_remove() solo la página activa (ver el
+        # comentario allí sobre por qué).
 
         self._build_sidebar()
 
@@ -1295,7 +1303,20 @@ class MainWindow(tk.Tk):
         )
 
     def _show_page(self, name: str) -> None:
-        self._pages[name].tkraise()
+        # grid()/grid_remove() en vez de solo tkraise(): tkraise() cambia el
+        # orden de apilado pero deja las 10 páginas gestionadas por grid a
+        # la vez, así que cada resize de la ventana recalculaba la geometría
+        # de las 10 (Treeviews, canvases, formularios) en vez de solo la
+        # visible -- causa de parte del parpadeo/lentitud al redimensionar.
+        # grid_remove() saca a una página de la gestión de geometría por
+        # completo (conserva sus opciones para volver a grid() sin
+        # reconfigurar nada) y es un no-op seguro sobre una página que
+        # todavía no se había mostrado nunca.
+        for key, page in self._pages.items():
+            if key == name:
+                page.grid(row=0, column=0, sticky="nsew")
+            else:
+                page.grid_remove()
 
     def _go_inicio(self) -> None:
         self._welcome_page.refresh()
