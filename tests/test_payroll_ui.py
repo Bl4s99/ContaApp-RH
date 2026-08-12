@@ -13,7 +13,7 @@ import pytest
 from app import payroll_ui
 from app.payroll import estimate_irpf_withholding_rate
 from app.repository import EmployeeInput, Repositories
-from app.payroll_ui import GeneratePayrollDialog, PayrollPage
+from app.payroll_ui import GeneratePayrollDialog, PayrollPage, PayrollSupplementDialog
 
 # tk_root/conn fixtures are session/function-scoped in tests/conftest.py.
 
@@ -122,8 +122,10 @@ class TestPayrollPageSnapshotDisplay:
         page._render_breakdown()
 
         # 24.000 / 14 pagas = 1.714,29 -- con punto de millar y coma
-        # decimal (formato español), no "1,714.29" (formato EE. UU.).
-        assert _grid_cell_text(page.breakdown_frame, 6, 1) == "1.714,29 €"
+        # decimal (formato español), no "1,714.29" (formato EE. UU.). Fila 7
+        # ("Bruto del mes"): 0=bruto anual, 1=hijos, 2=blanco, 3=paga
+        # ordinaria, 4=paga extra, 5=complementos sujetos, 6=dietas, 7=bruto.
+        assert _grid_cell_text(page.breakdown_frame, 7, 1) == "1.714,29 €"
         page.destroy()
 
 
@@ -214,6 +216,59 @@ class TestGeneratePayrollDialogPrefill:
 
         assert dialog.error_label.cget("text") != ""
         assert repos.payroll_records.get(employee_id, 2026, 3) is None
+        dialog.destroy()
+
+
+class TestPayrollSupplementDialogDietasNote:
+    def test_hidden_by_default_for_plus(
+        self, tk_root: tk.Tk, conn: sqlite3.Connection
+    ) -> None:
+        repos, _dept_id, employee_id = _build_repos(conn)
+        dialog = PayrollSupplementDialog(
+            tk_root, repos, employee_id, 2026, 3, on_change=lambda: None
+        )
+        assert not dialog.dietas_note_label.grid_info()
+        dialog.destroy()
+
+    def test_shown_when_dietas_selected(
+        self, tk_root: tk.Tk, conn: sqlite3.Connection
+    ) -> None:
+        repos, _dept_id, employee_id = _build_repos(conn)
+        dialog = PayrollSupplementDialog(
+            tk_root, repos, employee_id, 2026, 3, on_change=lambda: None
+        )
+        dialog.type_var.set(payroll_ui._SUPPLEMENT_TYPE_LABELS["dietas"])
+        dialog._handle_type_changed()
+        assert dialog.dietas_note_label.grid_info()
+        dialog.destroy()
+
+    def test_hidden_again_after_switching_away_from_dietas(
+        self, tk_root: tk.Tk, conn: sqlite3.Connection
+    ) -> None:
+        repos, _dept_id, employee_id = _build_repos(conn)
+        dialog = PayrollSupplementDialog(
+            tk_root, repos, employee_id, 2026, 3, on_change=lambda: None
+        )
+        dialog.type_var.set(payroll_ui._SUPPLEMENT_TYPE_LABELS["dietas"])
+        dialog._handle_type_changed()
+        dialog.type_var.set(payroll_ui._SUPPLEMENT_TYPE_LABELS["bonos"])
+        dialog._handle_type_changed()
+        assert not dialog.dietas_note_label.grid_info()
+        dialog.destroy()
+
+    def test_hidden_for_horas_extra_too(
+        self, tk_root: tk.Tk, conn: sqlite3.Connection
+    ) -> None:
+        # El otro tipo que también cambia de fila (horas_extra) no debe
+        # activar por error el aviso de dietas -- son dos toggles
+        # independientes sobre la misma fila 2-4 del formulario.
+        repos, _dept_id, employee_id = _build_repos(conn)
+        dialog = PayrollSupplementDialog(
+            tk_root, repos, employee_id, 2026, 3, on_change=lambda: None
+        )
+        dialog.type_var.set(payroll_ui._SUPPLEMENT_TYPE_LABELS["horas_extra"])
+        dialog._handle_type_changed()
+        assert not dialog.dietas_note_label.grid_info()
         dialog.destroy()
 
 

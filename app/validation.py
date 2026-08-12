@@ -865,7 +865,7 @@ def validate_date_range(start: date, end: date) -> None:
         raise ValidationError("rango_fechas", f"el rango no puede superar {MAX_RANGE_DAYS} días")
 
 
-SUPPLEMENT_TYPES: tuple[str, ...] = ("plus", "horas_extra", "anticipo")
+SUPPLEMENT_TYPES: tuple[str, ...] = ("plus", "horas_extra", "anticipo", "dietas", "bonos")
 MAX_SUPPLEMENT_AMOUNT = 1_000_000.0
 MAX_OVERTIME_HOURS_PER_ENTRY = 300.0  # límite de cordura (un mes tiene ~730h), no un límite legal
 

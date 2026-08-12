@@ -222,6 +222,7 @@ CREATE TABLE IF NOT EXISTS payroll_records (
     paga_ordinaria REAL NOT NULL,
     paga_extra REAL NOT NULL,
     supplements_total REAL NOT NULL DEFAULT 0,
+    exempt_supplements_total REAL NOT NULL DEFAULT 0,
     bruto_mes REAL NOT NULL,
     irpf_pct REAL NOT NULL,
     irpf_importe REAL NOT NULL,
@@ -257,7 +258,13 @@ CREATE TABLE IF NOT EXISTS payroll_supplements (
     employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
     year INTEGER NOT NULL,
     month INTEGER NOT NULL CHECK(month BETWEEN 1 AND 12),
-    supplement_type TEXT NOT NULL CHECK(supplement_type IN ('plus', 'horas_extra', 'anticipo')),
+    -- CHECK laxo a propósito (no una lista cerrada): SQLite no permite
+    -- ampliar un CHECK ya existente con ALTER TABLE, así que cada tipo
+    -- nuevo (ver _migrate_payroll_supplements_type_check) habría exigido
+    -- este mismo procedimiento de todos modos -- mismo criterio ya usado en
+    -- audit_log.action. La lista real de tipos válidos vive únicamente en
+    -- validation.SUPPLEMENT_TYPES.
+    supplement_type TEXT NOT NULL CHECK(length(trim(supplement_type)) > 0),
     description TEXT NOT NULL CHECK(length(trim(description)) > 0),
     amount REAL NOT NULL CHECK(amount > 0),
     hours REAL CHECK(hours IS NULL OR hours > 0),
@@ -621,6 +628,7 @@ CREATE TABLE IF NOT EXISTS payroll_records (
     paga_ordinaria DOUBLE PRECISION NOT NULL,
     paga_extra DOUBLE PRECISION NOT NULL,
     supplements_total DOUBLE PRECISION NOT NULL DEFAULT 0,
+    exempt_supplements_total DOUBLE PRECISION NOT NULL DEFAULT 0,
     bruto_mes DOUBLE PRECISION NOT NULL,
     irpf_pct DOUBLE PRECISION NOT NULL,
     irpf_importe DOUBLE PRECISION NOT NULL,
@@ -656,7 +664,10 @@ CREATE TABLE IF NOT EXISTS payroll_supplements (
     employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
     year INTEGER NOT NULL,
     month INTEGER NOT NULL CHECK(month BETWEEN 1 AND 12),
-    supplement_type TEXT NOT NULL CHECK(supplement_type IN ('plus', 'horas_extra', 'anticipo')),
+    -- CHECK laxo a propósito: la lista real de tipos válidos vive
+    -- únicamente en validation.SUPPLEMENT_TYPES (ver el mismo comentario en
+    -- la copia SQLite de esta tabla, más arriba en este fichero).
+    supplement_type TEXT NOT NULL CHECK(length(trim(supplement_type)) > 0),
     description TEXT NOT NULL CHECK(length(trim(description)) > 0),
     amount DOUBLE PRECISION NOT NULL CHECK(amount > 0),
     hours DOUBLE PRECISION CHECK(hours IS NULL OR hours > 0),
@@ -862,6 +873,7 @@ def init_db(conn: DbConnection) -> None:
     _migrate_employees_anonymized(conn)
     _migrate_employees_prl_training_date(conn)
     _migrate_audit_log_action_check(conn)
+    _migrate_payroll_supplements_type_check(conn)
     _migrate_employee_absences_previous_state(conn)
     _migrate_employees_manager_id(conn)
     _migrate_employees_head_of_department_id(conn)
@@ -1208,6 +1220,49 @@ def _migrate_payroll_records_supplements(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE payroll_records ADD COLUMN advances_total REAL NOT NULL DEFAULT 0"
         )
+    # Mismo razonamiento que supplements_total/advances_total arriba: una
+    # nómina ya congelada antes de que existieran las dietas nunca tuvo
+    # ninguna, así que 0 es su valor histórico real, no una suposición.
+    if "exempt_supplements_total" not in columns:
+        conn.execute(
+            "ALTER TABLE payroll_records ADD COLUMN exempt_supplements_total REAL NOT NULL DEFAULT 0"
+        )
+
+
+def _migrate_payroll_supplements_type_check(conn: sqlite3.Connection) -> None:
+    """payroll_supplements.supplement_type empezó con un CHECK de lista
+    cerrada (supplement_type IN ('plus', 'horas_extra', 'anticipo')); se
+    afloja aquí a "no vacío" por el mismo motivo y con el mismo
+    procedimiento que audit_log.action (ver _migrate_audit_log_action_check
+    más arriba): SQLite no permite ampliar un CHECK ya existente con ALTER
+    TABLE, y así no hace falta repetir esta migración cada vez que se añade
+    un tipo de complemento nuevo (aquí: dietas, bonos). Solo actúa si la
+    tabla ya existe con el CHECK viejo -- una base de datos recién creada ya
+    sale con el CHECK laxo directamente desde SCHEMA_TABLES."""
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'payroll_supplements'"
+    ).fetchone()
+    if row is None or row[0] is None or "supplement_type IN (" not in row[0]:
+        return
+    conn.executescript(
+        """
+        ALTER TABLE payroll_supplements RENAME TO payroll_supplements_old;
+        CREATE TABLE payroll_supplements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+            year INTEGER NOT NULL,
+            month INTEGER NOT NULL CHECK(month BETWEEN 1 AND 12),
+            supplement_type TEXT NOT NULL CHECK(length(trim(supplement_type)) > 0),
+            description TEXT NOT NULL CHECK(length(trim(description)) > 0),
+            amount REAL NOT NULL CHECK(amount > 0),
+            hours REAL CHECK(hours IS NULL OR hours > 0),
+            rate_per_hour REAL CHECK(rate_per_hour IS NULL OR rate_per_hour > 0),
+            created_at TEXT NOT NULL
+        );
+        INSERT INTO payroll_supplements SELECT * FROM payroll_supplements_old;
+        DROP TABLE payroll_supplements_old;
+        """
+    )
 
 
 def _migrate_backfill_employee_history(conn: sqlite3.Connection) -> None:

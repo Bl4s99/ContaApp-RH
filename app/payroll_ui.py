@@ -66,8 +66,17 @@ _SUPPLEMENT_TYPE_LABELS = {
     "plus": "Plus",
     "horas_extra": "Horas extra",
     "anticipo": "Anticipo",
+    "dietas": "Dietas",
+    "bonos": "Bonos",
 }
 _SUPPLEMENT_TYPE_BY_LABEL = {label: key for key, label in _SUPPLEMENT_TYPE_LABELS.items()}
+
+DIETAS_DISCLAIMER_TEXT = (
+    "⚠ Se asume que el importe está dentro de los límites legales diarios "
+    "exentos de IRPF y cotización a la Seguridad Social. Esta app no valida "
+    "esos límites (cambian cada año y según haya o no pernoctación o viaje "
+    "internacional) -- verifica los vigentes con tu gestoría."
+)
 
 
 class PayrollSettingsDialog(tk.Toplevel):
@@ -411,6 +420,10 @@ class PayrollSupplementDialog(tk.Toplevel):
         self.rate_var = tk.StringVar()
         self.rate_entry = ttk.Entry(frame, textvariable=self.rate_var, width=28)
 
+        self.dietas_note_label = ttk.Label(
+            frame, text=DIETAS_DISCLAIMER_TEXT, style="Muted.TLabel", wraplength=300, justify="left"
+        )
+
         self.error_label = ttk.Label(frame, text="", style="Error.TLabel", wraplength=300)
         self.error_label.grid(row=5, column=0, columnspan=2, sticky="w", padx=6, pady=(6, 0))
 
@@ -442,6 +455,13 @@ class PayrollSupplementDialog(tk.Toplevel):
             self.rate_entry.grid_remove()
             self.amount_label.grid(row=2, column=0, sticky="w", padx=6, pady=4)
             self.amount_entry.grid(row=2, column=1, padx=6, pady=4)
+
+        if self.type_var.get() == _SUPPLEMENT_TYPE_LABELS["dietas"]:
+            self.dietas_note_label.grid(
+                row=4, column=0, columnspan=2, sticky="w", padx=6, pady=(0, 4)
+            )
+        else:
+            self.dietas_note_label.grid_remove()
 
     def _handle_save(self) -> None:
         supplement_type = _SUPPLEMENT_TYPE_BY_LABEL[self.type_var.get()]
@@ -1025,8 +1045,10 @@ class PayrollPage(ttk.Frame):
             self.download_pdf_button.state(["disabled"])
             self.print_button.state(["disabled"])
             settings = self._repos.payroll_settings.get()
-            supplements_total, advances_total = self._repos.payroll_supplements.totals_for_employee_month(
-                employee.id, self._view_year, self._view_month
+            supplements_total, exempt_supplements_total, advances_total = (
+                self._repos.payroll_supplements.totals_for_employee_month(
+                    employee.id, self._view_year, self._view_month
+                )
             )
             payroll = calculate_monthly_payroll(
                 annual_gross_salary=employee.salary,
@@ -1036,6 +1058,7 @@ class PayrollPage(ttk.Frame):
                 month=self._view_month,
                 year=self._view_year,
                 supplements_total=supplements_total,
+                exempt_supplements_total=exempt_supplements_total,
                 advances_total=advances_total,
             )
             self._populate_breakdown_rows(employee.salary, employee.dependent_children, payroll)
@@ -1256,32 +1279,38 @@ class PayrollPage(ttk.Frame):
         add_row(3, "Paga ordinaria", _format_currency(payroll.paga_ordinaria), indent=True)
         add_row(4, "Paga extra (jul./dic.)", _format_currency(payroll.paga_extra), indent=True)
         add_row(
-            5, "Complementos (pluses/horas extra)", _format_currency(payroll.supplements_total),
+            5, "Complementos sujetos a IRPF/SS", _format_currency(payroll.supplements_total),
             indent=True,
         )
-        add_row(6, "Bruto del mes", _format_currency(payroll.bruto_mes), bold=True)
-        add_row(7, "", "")
+        add_row(
+            6,
+            "Dietas (no sujeto a IRPF/SS)",
+            _format_currency(payroll.exempt_supplements_total),
+            indent=True,
+        )
+        add_row(7, "Bruto del mes", _format_currency(payroll.bruto_mes), bold=True)
+        add_row(8, "", "")
 
         add_row(
-            8,
+            9,
             f"Retención IRPF ({payroll.irpf_pct:.2f}%)",
             f"-{_format_currency(payroll.irpf_importe)}",
             indent=True,
         )
         add_row(
-            9,
+            10,
             f"Seguridad Social trabajador ({payroll.ss_employee_pct:.2f}%)",
             f"-{_format_currency(payroll.ss_employee_importe)}",
             indent=True,
         )
-        add_row(10, "Anticipos ya pagados", f"-{_format_currency(payroll.advances_total)}", indent=True)
-        add_row(11, "NETO A PERCIBIR", _format_currency(payroll.neto), bold=True)
-        add_row(12, "", "")
+        add_row(11, "Anticipos ya pagados", f"-{_format_currency(payroll.advances_total)}", indent=True)
+        add_row(12, "NETO A PERCIBIR", _format_currency(payroll.neto), bold=True)
+        add_row(13, "", "")
 
         add_row(
-            13,
+            14,
             f"Seguridad Social empresa ({payroll.ss_employer_pct:.2f}%)",
             _format_currency(payroll.ss_employer_importe),
             indent=True,
         )
-        add_row(14, "COSTE TOTAL EMPRESA", _format_currency(payroll.coste_total_empresa), bold=True)
+        add_row(15, "COSTE TOTAL EMPRESA", _format_currency(payroll.coste_total_empresa), bold=True)

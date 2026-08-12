@@ -275,6 +275,75 @@ class TestCalculateMonthlyPayrollWithSupplements:
             )
 
 
+class TestCalculateMonthlyPayrollWithExemptSupplements:
+    def test_defaults_to_zero_and_matches_the_no_exempt_case(self) -> None:
+        with_defaults = calculate_monthly_payroll(24000, 0, 6.35, 31.40, month=3, year=2026)
+        explicit_zero = calculate_monthly_payroll(
+            24000, 0, 6.35, 31.40, month=3, year=2026, exempt_supplements_total=0.0
+        )
+        assert with_defaults == explicit_zero
+        assert with_defaults.exempt_supplements_total == 0.0
+
+    def test_exempt_supplements_increase_the_gross(self) -> None:
+        base = calculate_monthly_payroll(24000, 0, 6.35, 31.40, month=3, year=2026)
+        with_dietas = calculate_monthly_payroll(
+            24000, 0, 6.35, 31.40, month=3, year=2026, exempt_supplements_total=45.0
+        )
+        assert with_dietas.bruto_mes == pytest.approx(base.bruto_mes + 45.0)
+        assert with_dietas.exempt_supplements_total == 45.0
+
+    def test_exempt_supplements_do_not_affect_irpf_or_ss(self) -> None:
+        # La diferencia clave frente a un plus/bono: una dieta queda FUERA
+        # de la base de IRPF/SS -- estos importes deben quedar exactamente
+        # iguales, no solo "sin subir mucho".
+        base = calculate_monthly_payroll(24000, 0, 6.35, 31.40, month=3, year=2026)
+        with_dietas = calculate_monthly_payroll(
+            24000, 0, 6.35, 31.40, month=3, year=2026, exempt_supplements_total=45.0
+        )
+        assert with_dietas.irpf_pct == base.irpf_pct
+        assert with_dietas.irpf_importe == base.irpf_importe
+        assert with_dietas.ss_employee_importe == base.ss_employee_importe
+        assert with_dietas.ss_employer_importe == base.ss_employer_importe
+
+    def test_exempt_supplements_increase_neto_by_the_full_amount(self) -> None:
+        base = calculate_monthly_payroll(24000, 0, 6.35, 31.40, month=3, year=2026)
+        with_dietas = calculate_monthly_payroll(
+            24000, 0, 6.35, 31.40, month=3, year=2026, exempt_supplements_total=45.0
+        )
+        assert with_dietas.neto == pytest.approx(base.neto + 45.0)
+
+    def test_exempt_supplements_increase_employer_cost_by_the_full_amount(self) -> None:
+        base = calculate_monthly_payroll(24000, 0, 6.35, 31.40, month=3, year=2026)
+        with_dietas = calculate_monthly_payroll(
+            24000, 0, 6.35, 31.40, month=3, year=2026, exempt_supplements_total=45.0
+        )
+        assert with_dietas.coste_total_empresa == pytest.approx(base.coste_total_empresa + 45.0)
+
+    def test_taxable_and_exempt_supplements_combine_correctly(self) -> None:
+        result = calculate_monthly_payroll(
+            30000, 1, 6.35, 31.40, month=5, year=2026,
+            supplements_total=150.0, exempt_supplements_total=45.0, advances_total=300.0,
+        )
+        without_exempt = calculate_monthly_payroll(
+            30000, 1, 6.35, 31.40, month=5, year=2026,
+            supplements_total=150.0, advances_total=300.0,
+        )
+        # El plus (150) sube la base de IRPF/SS igual en ambos casos; la
+        # dieta (45) solo debe notarse en el bruto, no en lo retenido.
+        assert result.bruto_mes == pytest.approx(without_exempt.bruto_mes + 45.0)
+        assert result.irpf_importe == without_exempt.irpf_importe
+        assert result.ss_employee_importe == without_exempt.ss_employee_importe
+        assert result.neto == pytest.approx(
+            result.bruto_mes - result.irpf_importe - result.ss_employee_importe - 300.0
+        )
+
+    def test_negative_exempt_supplements_total_rejected(self) -> None:
+        with pytest.raises(ValueError):
+            calculate_monthly_payroll(
+                24000, 0, 6.35, 31.40, month=3, year=2026, exempt_supplements_total=-1.0
+            )
+
+
 class TestCalculateMonthlyPayrollWithIrpfOverride:
     def test_none_preserves_the_automatic_estimate(self) -> None:
         with_none = calculate_monthly_payroll(

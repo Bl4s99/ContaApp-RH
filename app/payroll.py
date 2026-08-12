@@ -128,6 +128,7 @@ class MonthlyPayroll:
     paga_ordinaria: float
     paga_extra: float
     supplements_total: float
+    exempt_supplements_total: float
     bruto_mes: float
     irpf_pct: float
     irpf_importe: float
@@ -148,18 +149,33 @@ def calculate_monthly_payroll(
     month: int,
     year: int,
     supplements_total: float = 0.0,
+    exempt_supplements_total: float = 0.0,
     advances_total: float = 0.0,
     irpf_pct_override: float | None = None,
 ) -> MonthlyPayroll:
-    """supplements_total (pluses + horas extra) y advances_total (anticipos ya
-    pagados) son ajustes puntuales de UN mes concreto, no del salario anual
-    base -- por eso son parámetros aparte en vez de tocar annual_gross_salary.
-    Simplificación deliberada, documentada aquí y en el aviso de la UI: el
-    tipo de IRPF (irpf_pct) sigue calculándose sobre el salario anual base
-    (sin complementos, que son variables mes a mes y no se pueden proyectar
-    con la misma fiabilidad), pero el IMPORTE retenido si se aplica sobre el
-    bruto del mes ya con los complementos incluidos -- igual que hacen en la
-    práctica muchos programas de nómina reales con las percepciones variables.
+    """supplements_total (pluses + horas extra + bonos) y advances_total
+    (anticipos ya pagados) son ajustes puntuales de UN mes concreto, no del
+    salario anual base -- por eso son parámetros aparte en vez de tocar
+    annual_gross_salary. Simplificación deliberada, documentada aquí y en el
+    aviso de la UI: el tipo de IRPF (irpf_pct) sigue calculándose sobre el
+    salario anual base (sin complementos, que son variables mes a mes y no se
+    pueden proyectar con la misma fiabilidad), pero el IMPORTE retenido si se
+    aplica sobre el bruto del mes ya con los complementos incluidos -- igual
+    que hacen en la práctica muchos programas de nómina reales con las
+    percepciones variables.
+
+    exempt_supplements_total (dietas) es un ajuste del mismo tipo pero
+    tratado de forma distinta a propósito: a diferencia de un plus/bono, una
+    dieta es una "percepción no salarial" en la nómina española -- exenta de
+    IRPF y de cotización a la Seguridad Social mientras se mantenga dentro de
+    los límites legales diarios (que cambian cada año y según haya o no
+    pernoctación/viaje internacional). Esta función NO valida esos límites:
+    asume que todo lo que llega aquí como exempt_supplements_total ya está
+    dentro de ellos, y por eso queda fuera de la base de IRPF/SS (base_sujeta
+    más abajo) pero SÍ suma a bruto_mes/neto/coste_total_empresa -- sigue
+    siendo dinero real que se paga y que la empresa paga, solo que no
+    tributa. Consulta siempre con una gestoría antes de dar por buena esta
+    distinción para una dieta real.
 
     irpf_pct_override, si se da, sustituye a estimate_irpf_withholding_rate()
     por completo -- pensado para el % real que una gestoría ya ha calculado
@@ -171,6 +187,8 @@ def calculate_monthly_payroll(
         raise ValueError(f"mes fuera de rango: {month}")
     if supplements_total < 0:
         raise ValueError("supplements_total no puede ser negativo")
+    if exempt_supplements_total < 0:
+        raise ValueError("exempt_supplements_total no puede ser negativo")
     if advances_total < 0:
         raise ValueError("advances_total no puede ser negativo")
     if irpf_pct_override is not None and irpf_pct_override < 0:
@@ -178,19 +196,24 @@ def calculate_monthly_payroll(
 
     paga_ordinaria = round(annual_gross_salary / PAGAS_TOTALES, 2)
     paga_extra = paga_ordinaria if month in MESES_PAGA_EXTRA else 0.0
-    bruto_mes = round(paga_ordinaria + paga_extra + supplements_total, 2)
+    # base_sujeta es la base de IRPF/SS (deliberadamente sin las dietas);
+    # bruto_mes es lo que de verdad se paga ese mes (con dietas incluidas).
+    # Cuando exempt_supplements_total es 0 (el caso por defecto y el único
+    # que existía antes de este parámetro), ambas coinciden exactamente.
+    base_sujeta = round(paga_ordinaria + paga_extra + supplements_total, 2)
+    bruto_mes = round(base_sujeta + exempt_supplements_total, 2)
 
     irpf_pct = (
         round(irpf_pct_override, 2)
         if irpf_pct_override is not None
         else estimate_irpf_withholding_rate(annual_gross_salary, ss_employee_pct, dependent_children)
     )
-    irpf_importe = round(bruto_mes * irpf_pct / 100.0, 2)
+    irpf_importe = round(base_sujeta * irpf_pct / 100.0, 2)
 
-    ss_employee_importe = round(bruto_mes * ss_employee_pct / 100.0, 2)
+    ss_employee_importe = round(base_sujeta * ss_employee_pct / 100.0, 2)
     neto = round(bruto_mes - irpf_importe - ss_employee_importe - advances_total, 2)
 
-    ss_employer_importe = round(bruto_mes * ss_employer_pct / 100.0, 2)
+    ss_employer_importe = round(base_sujeta * ss_employer_pct / 100.0, 2)
     coste_total_empresa = round(bruto_mes + ss_employer_importe, 2)
 
     return MonthlyPayroll(
@@ -199,6 +222,7 @@ def calculate_monthly_payroll(
         paga_ordinaria=paga_ordinaria,
         paga_extra=paga_extra,
         supplements_total=round(supplements_total, 2),
+        exempt_supplements_total=round(exempt_supplements_total, 2),
         bruto_mes=bruto_mes,
         irpf_pct=irpf_pct,
         irpf_importe=irpf_importe,

@@ -85,6 +85,65 @@ class TestMigrationsAreWiredUp:
         assert "company_ccc" in columns
         assert "company_address" in columns
 
+    def test_init_db_loosens_the_payroll_supplements_type_check_without_losing_rows(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        # Simula un payroll_supplements real escrito antes de que
+        # dietas/bonos existieran: CHECK cerrado a la lista antigua, igual
+        # que _migrate_audit_log_action_check ya resolvió para
+        # audit_log.action (ver _migrate_payroll_supplements_type_check).
+        department_id = conn.execute(
+            "INSERT INTO departments (name) VALUES ('Ventas')"
+        ).lastrowid
+        employee_id = conn.execute(
+            """INSERT INTO employees (
+                first_name, last_name, email, phone, position, department_id,
+                salary, hire_date, active, dependent_children
+            ) VALUES ('Ana', 'Lopez', 'ana@example.com', '', 'Comercial', ?, 24000, '2022-01-01', 1, 0)""",
+            (department_id,),
+        ).lastrowid
+        conn.executescript(
+            """
+            ALTER TABLE payroll_supplements RENAME TO payroll_supplements_old_check;
+            CREATE TABLE payroll_supplements (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+                year INTEGER NOT NULL,
+                month INTEGER NOT NULL CHECK(month BETWEEN 1 AND 12),
+                supplement_type TEXT NOT NULL
+                    CHECK(supplement_type IN ('plus', 'horas_extra', 'anticipo')),
+                description TEXT NOT NULL CHECK(length(trim(description)) > 0),
+                amount REAL NOT NULL CHECK(amount > 0),
+                hours REAL CHECK(hours IS NULL OR hours > 0),
+                rate_per_hour REAL CHECK(rate_per_hour IS NULL OR rate_per_hour > 0),
+                created_at TEXT NOT NULL
+            );
+            DROP TABLE payroll_supplements_old_check;
+            """
+        )
+        conn.execute(
+            """INSERT INTO payroll_supplements (
+                employee_id, year, month, supplement_type, description, amount, created_at
+            ) VALUES (?, 2026, 3, 'plus', 'Plus ya existente', 100.0, '2026-03-01T00:00:00')""",
+            (employee_id,),
+        )
+
+        init_db(conn)  # debe aflojar el CHECK sin perder la fila ya insertada
+
+        rows = conn.execute(
+            "SELECT supplement_type, description FROM payroll_supplements"
+        ).fetchall()
+        assert [tuple(row) for row in rows] == [("plus", "Plus ya existente")]
+
+        # El CHECK debe aceptar ahora "dietas" -- con el CHECK antiguo esto
+        # habría lanzado sqlite3.IntegrityError.
+        conn.execute(
+            """INSERT INTO payroll_supplements (
+                employee_id, year, month, supplement_type, description, amount, created_at
+            ) VALUES (?, 2026, 3, 'dietas', 'Viaje a Madrid', 45.0, '2026-03-02T00:00:00')""",
+            (employee_id,),
+        )
+
     def test_init_db_is_idempotent_on_an_already_migrated_database(
         self, conn: sqlite3.Connection
     ) -> None:

@@ -2850,6 +2850,28 @@ class TestPayrollRecordRepository:
         assert record.payroll.advances_total == 250.0
         assert record.payroll.bruto_mes == pytest.approx(round(28000.0 / 14, 2) + 100.0)
 
+    def test_generate_excludes_dietas_from_irpf_and_ss_but_not_from_bruto(
+        self, conn: sqlite3.Connection, employee_id: int
+    ) -> None:
+        # generate() vuelve a leer de la base de datos antes de devolver
+        # (ver el propio método, termina con self.get(...)), así que esto
+        # también comprueba que exempt_supplements_total sobrevive al
+        # INSERT/UPDATE y no solo al cálculo en memoria.
+        supplements = PayrollSupplementRepository(conn)
+        supplements.create(employee_id, 2026, 3, "plus", "Plus de transporte", amount=100.0)
+        supplements.create(employee_id, 2026, 3, "dietas", "Viaje a Madrid", amount=45.0)
+
+        record = PayrollRecordRepository(conn).generate(employee_id, 2026, 3)
+        payroll = record.payroll
+        assert payroll.supplements_total == 100.0
+        assert payroll.exempt_supplements_total == 45.0
+        assert payroll.bruto_mes == pytest.approx(round(28000.0 / 14, 2) + 100.0 + 45.0)
+
+        base_sujeta = payroll.bruto_mes - payroll.exempt_supplements_total
+        assert payroll.irpf_importe == round(base_sujeta * payroll.irpf_pct / 100.0, 2)
+        assert payroll.ss_employee_importe == round(base_sujeta * payroll.ss_employee_pct / 100.0, 2)
+        assert payroll.ss_employer_importe == round(base_sujeta * payroll.ss_employer_pct / 100.0, 2)
+
     def test_supplement_added_after_generating_does_not_alter_the_snapshot(
         self, conn: sqlite3.Connection, employee_id: int
     ) -> None:
@@ -3166,10 +3188,23 @@ class TestPayrollSupplementRepository:
             )
 
     def test_invalid_type_rejected(self, conn: sqlite3.Connection, employee_id: int) -> None:
+        # "aumento" es un tipo descartado a propósito (ver app/payroll.py):
+        # un aumento es un cambio permanente de salario, no un complemento
+        # puntual de un mes -- nunca debe aceptarse aquí.
         with pytest.raises(validation.ValidationError):
             PayrollSupplementRepository(conn).create(
-                employee_id, 2026, 3, "bono", "Tipo inventado", amount=50.0
+                employee_id, 2026, 3, "aumento", "Tipo inventado", amount=50.0
             )
+
+    @pytest.mark.parametrize("supplement_type", ["dietas", "bonos"])
+    def test_new_supplement_types_are_accepted(
+        self, conn: sqlite3.Connection, employee_id: int, supplement_type: str
+    ) -> None:
+        supplement = PayrollSupplementRepository(conn).create(
+            employee_id, 2026, 3, supplement_type, "X", amount=75.0
+        )
+        assert supplement.supplement_type == supplement_type
+        assert supplement.amount == 75.0
 
     def test_invalid_month_rejected(self, conn: sqlite3.Connection, employee_id: int) -> None:
         with pytest.raises(validation.ValidationError):
@@ -3214,16 +3249,35 @@ class TestPayrollSupplementRepository:
         repo.create(employee_id, 2026, 3, "plus", "Transporte", amount=100.0)
         repo.create(employee_id, 2026, 3, "horas_extra", "Extra", hours=4.0, rate_per_hour=12.5)
         repo.create(employee_id, 2026, 3, "anticipo", "Anticipo", amount=300.0)
-        supplements_total, advances_total = repo.totals_for_employee_month(employee_id, 2026, 3)
+        supplements_total, exempt_supplements_total, advances_total = (
+            repo.totals_for_employee_month(employee_id, 2026, 3)
+        )
         assert supplements_total == 150.0  # 100 (plus) + 50 (4h * 12.5)
+        assert exempt_supplements_total == 0.0
         assert advances_total == 300.0
+
+    def test_totals_separate_exempt_dietas_and_taxable_bonos(
+        self, conn: sqlite3.Connection, employee_id: int
+    ) -> None:
+        repo = PayrollSupplementRepository(conn)
+        repo.create(employee_id, 2026, 3, "plus", "Transporte", amount=100.0)
+        repo.create(employee_id, 2026, 3, "bonos", "Objetivos Q1", amount=200.0)
+        repo.create(employee_id, 2026, 3, "dietas", "Viaje a Madrid", amount=45.0)
+        supplements_total, exempt_supplements_total, advances_total = (
+            repo.totals_for_employee_month(employee_id, 2026, 3)
+        )
+        # bonos tributa igual que un plus -- entra en el mismo bucket sujeto.
+        assert supplements_total == 300.0  # 100 (plus) + 200 (bonos)
+        # dietas queda aparte, en el bucket exento.
+        assert exempt_supplements_total == 45.0
+        assert advances_total == 0.0
 
     def test_totals_are_zero_with_no_entries(
         self, conn: sqlite3.Connection, employee_id: int
     ) -> None:
         assert PayrollSupplementRepository(conn).totals_for_employee_month(
             employee_id, 2026, 3
-        ) == (0.0, 0.0)
+        ) == (0.0, 0.0, 0.0)
 
     def test_delete_removes_the_supplement(
         self, conn: sqlite3.Connection, employee_id: int

@@ -8,7 +8,8 @@ from app.payroll_pdf import (
     CompanyInfo,
     _category_line,
     _deducciones_rows,
-    _devengos_rows,
+    _devengos_no_salariales_rows,
+    _devengos_salariales_rows,
     _format_currency,
     _format_percentage,
     _period_days,
@@ -150,16 +151,16 @@ class TestCategoryLine:
         assert _category_line("Ingeniera", None) == ("Puesto", "Ingeniera")
 
 
-class TestDevengosRows:
+class TestDevengosSalarialesRows:
     def test_includes_paga_ordinaria(self) -> None:
         record = make_record()
-        rows = _devengos_rows(record, ())
+        rows = _devengos_salariales_rows(record, ())
         labels = [label for label, _ in rows]
         assert "Salario base (paga ordinaria)" in labels
 
     def test_omits_paga_extra_when_zero(self) -> None:
         record = make_record()  # marzo: no es mes de paga extra
-        rows = _devengos_rows(record, ())
+        rows = _devengos_salariales_rows(record, ())
         labels = [label for label, _ in rows]
         assert not any("extraordinaria" in label for label in labels)
 
@@ -171,17 +172,60 @@ class TestDevengosRows:
                 id=2, supplement_type="horas_extra", description="5h extra", amount=50.0
             ),
         ]
-        rows = _devengos_rows(record, supplements)
+        rows = _devengos_salariales_rows(record, supplements)
         labels = [label for label, _ in rows]
         assert any("Plus de idiomas" in label for label in labels)
         assert any("5h extra" in label for label in labels)
 
+    def test_includes_bonos_supplements(self) -> None:
+        # Un bono tributa igual que un plus -- pertenece a este desglose,
+        # no al de percepciones no salariales.
+        record = make_record()
+        supplements = [make_supplement(supplement_type="bonos", description="Bono Q1", amount=200.0)]
+        rows = _devengos_salariales_rows(record, supplements)
+        labels = [label for label, _ in rows]
+        assert any("Bono Q1" in label for label in labels)
+
     def test_excludes_anticipo_supplements(self) -> None:
         record = make_record()
         supplements = [make_supplement(supplement_type="anticipo", description="Anticipo marzo")]
-        rows = _devengos_rows(record, supplements)
+        rows = _devengos_salariales_rows(record, supplements)
         labels = [label for label, _ in rows]
         assert not any("Anticipo" in label for label in labels)
+
+    def test_excludes_dietas_supplements(self) -> None:
+        # Las dietas son percepción no salarial -- ver TestDevengosNoSalarialesRows.
+        record = make_record()
+        supplements = [make_supplement(supplement_type="dietas", description="Viaje a Madrid")]
+        rows = _devengos_salariales_rows(record, supplements)
+        labels = [label for label, _ in rows]
+        assert not any("Viaje a Madrid" in label for label in labels)
+
+
+class TestDevengosNoSalarialesRows:
+    def test_empty_without_dietas(self) -> None:
+        supplements = [
+            make_supplement(supplement_type="plus", description="Plus de idiomas"),
+            make_supplement(id=2, supplement_type="anticipo", description="Anticipo marzo"),
+        ]
+        assert _devengos_no_salariales_rows(supplements) == []
+
+    def test_includes_dietas(self) -> None:
+        supplements = [
+            make_supplement(supplement_type="dietas", description="Viaje a Madrid", amount=45.0)
+        ]
+        rows = _devengos_no_salariales_rows(supplements)
+        labels = [label for label, _ in rows]
+        assert any("Viaje a Madrid" in label for label in labels)
+
+    def test_excludes_plus_horas_extra_bonos_and_anticipo(self) -> None:
+        supplements = [
+            make_supplement(supplement_type="plus", description="Plus de idiomas"),
+            make_supplement(id=2, supplement_type="horas_extra", description="5h extra"),
+            make_supplement(id=3, supplement_type="bonos", description="Bono Q1"),
+            make_supplement(id=4, supplement_type="anticipo", description="Anticipo marzo"),
+        ]
+        assert _devengos_no_salariales_rows(supplements) == []
 
 
 class TestDeduccionesRows:
@@ -279,6 +323,25 @@ class TestBuildPayrollPdfWellFormedness:
                 make_supplement(supplement_type="plus", description="Plus"),
                 make_supplement(id=2, supplement_type="horas_extra", description="Horas"),
                 make_supplement(id=3, supplement_type="anticipo", description="Anticipo"),
+            ],
+        )
+        assert pdf_bytes.startswith(b"%PDF-")
+
+    def test_does_not_raise_with_dietas_and_bonos(self) -> None:
+        # Camino con las dos secciones de I. DEVENGOS a la vez (percepciones
+        # salariales + no salariales) -- el resto de tests de esta clase
+        # solo ejercitan el camino donde la segunda queda vacía y se omite.
+        pdf_bytes = build_payroll_pdf(
+            employee=make_employee(),
+            department_name="Tecnología",
+            professional_category_name="Técnico de nivel 2",
+            company=self._company(),
+            record=make_record(),
+            supplements=[
+                make_supplement(supplement_type="bonos", description="Bono Q1", amount=200.0),
+                make_supplement(
+                    id=2, supplement_type="dietas", description="Viaje a Madrid", amount=45.0
+                ),
             ],
         )
         assert pdf_bytes.startswith(b"%PDF-")

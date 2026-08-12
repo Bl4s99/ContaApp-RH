@@ -1264,3 +1264,49 @@ class TestTrainingExpirationDate:
     def test_rejects_malformed_date(self) -> None:
         with pytest.raises(validation.ValidationError):
             validation.validate_training_expiration_date("01/02/2027", date(2024, 1, 1))
+
+
+class TestSupplementType:
+    @pytest.mark.parametrize("value", ["plus", "horas_extra", "anticipo", "dietas", "bonos"])
+    def test_accepts_every_known_type(self, value: str) -> None:
+        assert validation.validate_supplement_type(value) == value
+
+    @pytest.mark.parametrize("value", ["", "bono", "aumento", "PLUS", "otro"])
+    def test_rejects_unknown_type(self, value: str) -> None:
+        with pytest.raises(validation.ValidationError):
+            validation.validate_supplement_type(value)
+
+
+class TestSupplementAmount:
+    def test_accepts_a_positive_amount(self) -> None:
+        assert validation.validate_supplement_amount(123.456) == 123.46
+
+    @pytest.mark.parametrize("value", [0.0, -50.0])
+    def test_rejects_zero_or_negative(self, value: float) -> None:
+        with pytest.raises(validation.ValidationError):
+            validation.validate_supplement_amount(value)
+
+    def test_rejects_above_the_sanity_ceiling(self) -> None:
+        with pytest.raises(validation.ValidationError):
+            validation.validate_supplement_amount(validation.MAX_SUPPLEMENT_AMOUNT + 0.01)
+
+
+class TestOvertimeHoursAndRate:
+    def test_accepts_positive_hours_and_rate(self) -> None:
+        assert validation.validate_overtime_hours_and_rate(4.0, 12.5) == (4.0, 12.5)
+
+    @pytest.mark.parametrize("hours", [0.0, -1.0])
+    def test_rejects_zero_or_negative_hours(self, hours: float) -> None:
+        with pytest.raises(validation.ValidationError):
+            validation.validate_overtime_hours_and_rate(hours, 12.5)
+
+    def test_rejects_hours_above_the_sanity_ceiling(self) -> None:
+        with pytest.raises(validation.ValidationError):
+            validation.validate_overtime_hours_and_rate(
+                validation.MAX_OVERTIME_HOURS_PER_ENTRY + 1, 12.5
+            )
+
+    @pytest.mark.parametrize("rate", [0.0, -1.0])
+    def test_rejects_zero_or_negative_rate(self, rate: float) -> None:
+        with pytest.raises(validation.ValidationError):
+            validation.validate_overtime_hours_and_rate(4.0, rate)

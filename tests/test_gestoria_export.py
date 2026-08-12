@@ -49,6 +49,7 @@ def make_record(**overrides: object) -> PayrollRecord:
         paga_ordinaria=2000.0,
         paga_extra=0.0,
         supplements_total=100.0,
+        exempt_supplements_total=0.0,
         bruto_mes=2100.0,
         irpf_pct=15.0,
         irpf_importe=315.0,

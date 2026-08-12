@@ -10,6 +10,12 @@ separadas), el PDF lo dice explícitamente en vez de fingir una precisión que
 no tiene. Mismo espíritu que el aviso ya usado en toda la app de Nóminas
 (DISCLAIMER_TEXT, app/payroll_ui.py).
 
+El aspecto visual reutiliza la identidad de marca de la app (azul pizarra,
+ver app/theme.py) en vez del gris/Helvetica genérico de un PDF por defecto --
+membrete con el nombre de la app, tarjetas EMPRESA/TRABAJADOR con cabecera de
+color, filas alternas en las tablas de importes y una franja de líquido a
+percibir a modo de cierre visual del documento.
+
 Sin UI ni base de datos -- función pura sobre datos ya obtenidos por quien
 llama (mismo criterio que app/payroll.py, app/sepa_export.py,
 app/gestoria_export.py)."""
@@ -21,12 +27,13 @@ from datetime import date
 from io import BytesIO
 
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import (
     Flowable,
+    HRFlowable,
+    KeepTogether,
     Paragraph,
     SimpleDocTemplate,
     Spacer,
@@ -55,11 +62,19 @@ DISCLAIMER_TEXT = (
     "Verifica siempre con tu gestoría antes de considerar esta nómina definitiva."
 )
 
-_DISCLAIMER_BG = colors.HexColor("#fdf3cd")  # theme.py, disclaimer_bg (modo claro)
-_DISCLAIMER_FG = colors.HexColor("#7a5b00")  # theme.py, disclaimer_fg (modo claro)
-_HEADING_BG = colors.HexColor("#2f6690")
-_TOTAL_BG = colors.HexColor("#eef3f7")
-_GRID_COLOR = colors.HexColor("#b5b5b5")
+# Colores duplicados de la paleta CLARA de app/theme.py (mismo motivo que
+# _MONTH_NAMES arriba: este módulo no puede importar theme.py sin arrastrar
+# tkinter). Siempre la paleta clara -- un PDF se "imprime en papel blanco",
+# no hay modo oscuro que aplicarle.
+_PRIMARY_DARK_HEX = "#1c3d5c"
+_PRIMARY_HEX = "#2f6690"
+_PRIMARY_LIGHT_HEX = "#5b9bd5"
+_PRIMARY_DARK = colors.HexColor(_PRIMARY_DARK_HEX)
+_PRIMARY = colors.HexColor(_PRIMARY_HEX)
+_PRIMARY_PALE = colors.HexColor("#e8f0f7")
+_BORDER = colors.HexColor("#d7dee6")
+_DISCLAIMER_BG = colors.HexColor("#fdf3cd")
+_DISCLAIMER_FG = colors.HexColor("#7a5b00")
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,7 +143,7 @@ def _category_line(position: str, professional_category_name: str | None) -> tup
     return ("Puesto", position)
 
 
-def _devengos_rows(
+def _devengos_salariales_rows(
     payroll_record: PayrollRecord, supplements: Sequence[PayrollSupplement]
 ) -> list[tuple[str, str]]:
     payroll = payroll_record.payroll
@@ -144,8 +159,29 @@ def _devengos_rows(
     # propia página de Nóminas, cuyo árbol de complementos también es
     # siempre en vivo, se esté mirando un registro congelado o no.
     for supplement in supplements:
-        if supplement.supplement_type == "anticipo":
-            continue  # es una deducción (anticipo ya pagado), no un devengo
+        if supplement.supplement_type in ("anticipo", "dietas"):
+            # anticipo es una deducción (ver _deducciones_rows); dietas es
+            # una percepción NO salarial (ver _devengos_no_salariales_rows) --
+            # ninguna de las dos pertenece a este desglose.
+            continue
+        label = _SUPPLEMENT_TYPE_LABELS.get(supplement.supplement_type, supplement.supplement_type)
+        text = f"{label} — {supplement.description}" if supplement.description else label
+        rows.append((text, _format_currency(supplement.amount)))
+    return rows
+
+
+def _devengos_no_salariales_rows(
+    supplements: Sequence[PayrollSupplement],
+) -> list[tuple[str, str]]:
+    # Dietas -- percepción no salarial, exenta de IRPF/SS mientras se
+    # mantenga dentro de los límites legales diarios (ver el docstring de
+    # calculate_monthly_payroll() en app/payroll.py). Es la única partida
+    # de este desglose; si en el futuro se añade otro tipo no salarial,
+    # se sumaría aquí junto a ella.
+    rows = []
+    for supplement in supplements:
+        if supplement.supplement_type != "dietas":
+            continue
         label = _SUPPLEMENT_TYPE_LABELS.get(supplement.supplement_type, supplement.supplement_type)
         text = f"{label} — {supplement.description}" if supplement.description else label
         rows.append((text, _format_currency(supplement.amount)))
@@ -178,6 +214,8 @@ def _deducciones_rows(
 _SUPPLEMENT_TYPE_LABELS = {
     "plus": "Plus",
     "horas_extra": "Horas extra",
+    "bonos": "Bonos",
+    "dietas": "Dietas",
 }
 
 
@@ -187,12 +225,13 @@ def _rows_table(rows: Sequence[tuple[str, str]], styles: dict[str, ParagraphStyl
     table.setStyle(
         TableStyle(
             [
-                ("GRID", (0, 0), (-1, -1), 0.4, _GRID_COLOR),
+                ("ROWBACKGROUNDS", (0, 0), (-1, -1), [colors.white, _PRIMARY_PALE]),
+                ("LINEBELOW", (0, -1), (-1, -1), 0.75, _BORDER),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 6),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-                ("TOPPADDING", (0, 0), (-1, -1), 3),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
             ]
         )
     )
@@ -207,13 +246,13 @@ def _total_row_table(label: str, amount: str, styles: dict[str, ParagraphStyle])
     table.setStyle(
         TableStyle(
             [
-                ("GRID", (0, 0), (-1, -1), 0.4, _GRID_COLOR),
-                ("BACKGROUND", (0, 0), (-1, -1), _TOTAL_BG),
+                ("BACKGROUND", (0, 0), (-1, -1), _PRIMARY_PALE),
+                ("LINEABOVE", (0, 0), (-1, 0), 1, _PRIMARY),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 6),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-                ("TOPPADDING", (0, 0), (-1, -1), 4),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                ("TOPPADDING", (0, 0), (-1, -1), 5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
             ]
         )
     )
@@ -225,10 +264,139 @@ def _section_heading(text: str, styles: dict[str, ParagraphStyle]) -> Table:
     table.setStyle(
         TableStyle(
             [
-                ("BACKGROUND", (0, 0), (-1, -1), _HEADING_BG),
-                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("BACKGROUND", (0, 0), (-1, -1), _PRIMARY),
+                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                ("TOPPADDING", (0, 0), (-1, -1), 5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ]
+        )
+    )
+    return table
+
+
+def _subsection_label(text: str, styles: dict[str, ParagraphStyle]) -> Paragraph:
+    # Subtítulo ligero dentro de DEVENGOS ("Percepciones salariales" /
+    # "Percepciones no salariales") -- a diferencia de _section_heading, sin
+    # banda de color propia: es una subdivisión de la sección, no una
+    # sección nueva, y una segunda banda azul del mismo peso visual que
+    # "I. DEVENGOS" la haría parecer una sección independiente.
+    return Paragraph(text, styles["subsection_label"])
+
+
+def _letterhead(period_label: str, styles: dict[str, ParagraphStyle]) -> Table:
+    # Membrete con el nombre de la app en vez del título centrado genérico
+    # que tenía esta plantilla antes -- primer elemento visible del
+    # documento, mismo azul pizarra oscuro que la barra lateral de la app.
+    wordmark = Paragraph(
+        f'Conta<b>App</b> <font color="{_PRIMARY_LIGHT_HEX}"><b>RH</b></font>',
+        styles["wordmark"],
+    )
+    doc_title = Paragraph(
+        f"RECIBO DE SALARIOS<br/>"
+        f'<font color="{_PRIMARY_LIGHT_HEX}" size="10">{period_label}</font>',
+        styles["letterhead_right"],
+    )
+    table = Table([[wordmark, doc_title]], colWidths=[90 * mm, 70 * mm])
+    table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), _PRIMARY_DARK),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (0, 0), 10),
+                ("RIGHTPADDING", (1, 0), (1, 0), 10),
+                ("TOPPADDING", (0, 0), (-1, -1), 8),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+            ]
+        )
+    )
+    return table
+
+
+_CardRow = tuple[str, str]
+
+
+def _info_card(title: str, rows: Sequence[_CardRow], styles: dict[str, ParagraphStyle]) -> Table:
+    # Tarjeta EMPRESA/TRABAJADOR con cabecera de color propia -- construida
+    # como dos tablas anidadas (cabecera + filas) dentro de una tercera que
+    # las envuelve con un único borde, porque una Table de reportlab no deja
+    # aplicar un color de fondo distinto a "la primera fila" cuando el resto
+    # de filas tiene un número de columnas distinto (cabecera=1 col, filas=2).
+    # Una versión anterior intentó emparejar dos campos cortos en la misma
+    # fila (NIF/CIF + C.C.C., Departamento + Antigüedad) para ahorrar altura
+    # -- pero repartir 80mm en 4 columnas de ancho fijo solo funciona si SE
+    # ACIERTA el ancho de cada valor real, y los valores reales (NIF, CCC,
+    # nombres de departamento...) varían en longitud de una empresa a otra;
+    # con datos de prueba distintos, la etiqueta "Departamento" llegó a
+    # partirse a mitad de palabra. Una sola columna de valor a todo el ancho
+    # de la tarjeta, que reportlab ajusta por sí solo, es más lento de leer
+    # pero no se puede romper por un valor más largo de lo esperado -- más
+    # filas seguras es mejor que columnas que a veces no caben.
+    header = Table([[Paragraph(title, styles["card_title"])]], colWidths=[80 * mm])
+    header.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), _PRIMARY_PALE),
+                ("LEFTPADDING", (0, 0), (-1, -1), 7),
                 ("TOPPADDING", (0, 0), (-1, -1), 4),
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ]
+        )
+    )
+    body_data = [
+        [Paragraph(label, styles["card_label"]), Paragraph(value or "—", styles["card_value"])]
+        for label, value in rows
+    ]
+    body = Table(body_data, colWidths=[24 * mm, 56 * mm])
+    body.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 7),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ]
+        )
+    )
+    wrapper = Table([[header], [body]], colWidths=[80 * mm])
+    wrapper.setStyle(
+        TableStyle(
+            [
+                ("BOX", (0, 0), (-1, -1), 0.6, _BORDER),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ]
+        )
+    )
+    return wrapper
+
+
+def _liquido_band(amount_text: str, styles: dict[str, ParagraphStyle]) -> Table:
+    # Franja de cierre del bloque de importes -- deliberadamente el elemento
+    # con más peso visual de la página (mismo azul oscuro del membrete, cifra
+    # más grande que cualquier otro número del documento) para que el
+    # líquido a percibir sea lo primero que salte a la vista, no solo un
+    # renglón más entre los demás totales.
+    table = Table(
+        [
+            [
+                Paragraph("LÍQUIDO TOTAL A PERCIBIR", styles["liquido_label"]),
+                Paragraph(amount_text, styles["liquido_amount"]),
+            ]
+        ],
+        colWidths=[100 * mm, 60 * mm],
+    )
+    table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), _PRIMARY_DARK),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 10),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+                ("TOPPADDING", (0, 0), (-1, -1), 9),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 9),
             ]
         )
     )
@@ -236,50 +404,119 @@ def _section_heading(text: str, styles: dict[str, ParagraphStyle]) -> Table:
 
 
 def _build_styles() -> dict[str, ParagraphStyle]:
+    # Escala tipográfica deliberada (nunca menos de 1.3x fontSize de leading,
+    # nunca menos de 8pt para texto con información real, no decorativo) --
+    # la versión anterior de esta plantilla apretaba el interlineado y el
+    # padding de las celdas hasta el límite justo para caber en una página,
+    # y aunque no se veía roto en esta máquina, las fuentes estándar de PDF
+    # (Helvetica/Times) no van incrustadas en el archivo -- cada lector las
+    # sustituye por su propia versión, con sus propias métricas, así que un
+    # ajuste "al milímetro" en un lector puede desbordarse en otro. Mejor
+    # dejar aire de sobra en todas partes y, si hace falta, que el documento
+    # ocupe una segunda página -- nunca al revés.
     base = getSampleStyleSheet()
     return {
-        "title": ParagraphStyle("title", parent=base["Title"], fontSize=14, alignment=TA_CENTER),
+        "wordmark": ParagraphStyle(
+            "wordmark",
+            parent=base["Normal"],
+            fontSize=17,
+            leading=20,
+            fontName="Helvetica",
+            textColor=colors.white,
+        ),
+        "letterhead_right": ParagraphStyle(
+            "letterhead_right",
+            parent=base["Normal"],
+            fontSize=12,
+            leading=16,
+            fontName="Helvetica-Bold",
+            textColor=colors.white,
+            alignment=2,
+        ),
         "disclaimer": ParagraphStyle(
             "disclaimer",
             parent=base["Normal"],
-            fontSize=8,
+            fontSize=8.5,
+            leading=12,
             textColor=_DISCLAIMER_FG,
-            leading=11,
         ),
-        "header_label": ParagraphStyle(
-            "header_label", parent=base["Normal"], fontSize=9, textColor=colors.grey
+        "card_title": ParagraphStyle(
+            "card_title",
+            parent=base["Normal"],
+            fontSize=10,
+            leading=13,
+            fontName="Helvetica-Bold",
+            textColor=_PRIMARY_DARK,
         ),
-        "header_value": ParagraphStyle("header_value", parent=base["Normal"], fontSize=10),
+        "card_label": ParagraphStyle(
+            "card_label", parent=base["Normal"], fontSize=8, leading=11, textColor=colors.grey
+        ),
+        "card_value": ParagraphStyle(
+            "card_value",
+            parent=base["Normal"],
+            fontSize=9.5,
+            leading=13,
+            fontName="Helvetica-Bold",
+        ),
+        "period_line": ParagraphStyle(
+            "period_line", parent=base["Normal"], fontSize=9, leading=12, textColor=colors.grey
+        ),
         "section_heading": ParagraphStyle(
             "section_heading",
             parent=base["Normal"],
-            fontSize=10,
+            fontSize=11,
+            leading=14,
             textColor=colors.white,
             fontName="Helvetica-Bold",
         ),
-        "cell": ParagraphStyle("cell", parent=base["Normal"], fontSize=9),
+        "subsection_label": ParagraphStyle(
+            "subsection_label",
+            parent=base["Normal"],
+            fontSize=9.5,
+            leading=13,
+            fontName="Helvetica-Bold",
+            textColor=_PRIMARY_DARK,
+        ),
+        "cell": ParagraphStyle("cell", parent=base["Normal"], fontSize=9.5, leading=13),
         "cell_right": ParagraphStyle(
-            "cell_right", parent=base["Normal"], fontSize=9, alignment=2
+            "cell_right", parent=base["Normal"], fontSize=9.5, leading=13, alignment=2
         ),
         "total_label": ParagraphStyle(
-            "total_label", parent=base["Normal"], fontSize=10, fontName="Helvetica-Bold"
+            "total_label",
+            parent=base["Normal"],
+            fontSize=10,
+            leading=13,
+            fontName="Helvetica-Bold",
         ),
         "total_amount": ParagraphStyle(
             "total_amount",
             parent=base["Normal"],
             fontSize=10,
+            leading=13,
             fontName="Helvetica-Bold",
             alignment=2,
         ),
+        "liquido_label": ParagraphStyle(
+            "liquido_label",
+            parent=base["Normal"],
+            fontSize=12,
+            leading=16,
+            fontName="Times-Bold",
+            textColor=colors.white,
+        ),
+        "liquido_amount": ParagraphStyle(
+            "liquido_amount",
+            parent=base["Normal"],
+            fontSize=20,
+            leading=24,
+            fontName="Times-Bold",
+            textColor=colors.white,
+            alignment=2,
+        ),
         "footer": ParagraphStyle(
-            "footer", parent=base["Normal"], fontSize=7, textColor=colors.grey
+            "footer", parent=base["Normal"], fontSize=7.5, leading=10, textColor=colors.grey
         ),
     }
-
-
-def _header_field(label: str, value: str, styles: dict[str, ParagraphStyle]) -> Paragraph:
-    text = f"<b>{label}:</b> {value}" if value else f"<b>{label}:</b> —"
-    return Paragraph(text, styles["header_value"])
 
 
 def build_payroll_pdf(
@@ -292,21 +529,23 @@ def build_payroll_pdf(
 ) -> bytes:
     payroll = record.payroll
     styles = _build_styles()
+    period_label = _period_label(payroll.year, payroll.month)
     buffer = BytesIO()
     doc = SimpleDocTemplate(
         buffer,
         pagesize=A4,
-        topMargin=15 * mm,
-        bottomMargin=15 * mm,
+        topMargin=10 * mm,
+        bottomMargin=12 * mm,
         leftMargin=20 * mm,
         rightMargin=20 * mm,
-        title=f"Nómina — {employee.full_name} — {_period_label(payroll.year, payroll.month)}",
+        title=f"Nómina — {employee.full_name} — {period_label}",
     )
 
     story: list[Flowable] = []
 
-    story.append(Paragraph("Recibo individual de salarios", styles["title"]))
+    story.append(_letterhead(period_label, styles))
     story.append(Spacer(1, 4 * mm))
+
     disclaimer_table = Table(
         [[Paragraph(DISCLAIMER_TEXT, styles["disclaimer"])]], colWidths=[160 * mm]
     )
@@ -314,126 +553,143 @@ def build_payroll_pdf(
         TableStyle(
             [
                 ("BACKGROUND", (0, 0), (-1, -1), _DISCLAIMER_BG),
-                ("BOX", (0, 0), (-1, -1), 0.5, _DISCLAIMER_FG),
-                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                ("LINEBEFORE", (0, 0), (0, 0), 3, _DISCLAIMER_FG),
+                ("LEFTPADDING", (0, 0), (-1, -1), 10),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-                ("TOPPADDING", (0, 0), (-1, -1), 6),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                ("TOPPADDING", (0, 0), (-1, -1), 7),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
             ]
         )
     )
     story.append(disclaimer_table)
-    story.append(Spacer(1, 5 * mm))
+    story.append(Spacer(1, 4 * mm))
 
     category_label, category_value = _category_line(employee.position, professional_category_name)
     period_last_day = date(payroll.year, payroll.month, _period_days(payroll.year, payroll.month))
-    header_data = [
-        [
-            _header_field("Empresa", company.name, styles),
-            _header_field("Trabajador", employee.full_name, styles),
-        ],
-        [
-            _header_field("NIF / CIF", company.nif, styles),
-            _header_field("NIF / NIE", employee.dni_nie or "", styles),
-        ],
-        [
-            _header_field("C.C.C.", company.ccc, styles),
-            _header_field("Nº afiliación S.S.", employee.ss_number or "", styles),
-        ],
-        [
-            _header_field("Domicilio", company.address, styles),
-            _header_field(category_label, category_value, styles),
-        ],
-        [
-            Paragraph("", styles["header_value"]),
-            _header_field("Departamento", department_name, styles),
-        ],
-        [
-            Paragraph("", styles["header_value"]),
-            _header_field(
-                "Antigüedad", _seniority_text(employee.hire_date, period_last_day), styles
-            ),
-        ],
+    empresa_rows: list[_CardRow] = [
+        ("Empresa", company.name),
+        ("NIF/CIF", company.nif),
+        ("C.C.C.", company.ccc),
+        ("Domicilio", company.address),
     ]
-    header_table = Table(header_data, colWidths=[80 * mm, 80 * mm])
-    header_table.setStyle(
+    trabajador_rows: list[_CardRow] = [
+        ("Trabajador/a", employee.full_name),
+        ("NIF/NIE", employee.dni_nie or ""),
+        ("Nº afiliación S.S.", employee.ss_number or ""),
+        (category_label, category_value),
+        ("Departamento", department_name),
+        ("Antigüedad", _seniority_text(employee.hire_date, period_last_day)),
+    ]
+    cards_table = Table(
+        [[_info_card("EMPRESA", empresa_rows, styles), _info_card("TRABAJADOR/A", trabajador_rows, styles)]],
+        colWidths=[80 * mm, 80 * mm],
+    )
+    cards_table.setStyle(
         TableStyle(
             [
                 ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 4),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (0, 0), 0),
+                ("RIGHTPADDING", (1, 0), (1, 0), 0),
+                ("LEFTPADDING", (1, 0), (1, 0), 6 * mm),
             ]
         )
     )
-    story.append(header_table)
+    story.append(cards_table)
     story.append(Spacer(1, 3 * mm))
     story.append(
         Paragraph(
-            f"<b>Período de liquidación:</b> {_period_label(payroll.year, payroll.month)} "
+            f"Período de liquidación: <b>{period_label}</b> "
             f"({_period_days(payroll.year, payroll.month)} días)",
-            styles["header_value"],
+            styles["period_line"],
         )
     )
-    story.append(Spacer(1, 5 * mm))
-
-    story.append(_section_heading("I. DEVENGOS", styles))
-    story.append(_rows_table(_devengos_rows(record, supplements), styles))
-    story.append(_total_row_table("TOTAL DEVENGADO (bruto del mes)", _format_currency(payroll.bruto_mes), styles))
     story.append(Spacer(1, 4 * mm))
 
-    total_deducir = payroll.ss_employee_importe + payroll.irpf_importe + payroll.advances_total
-    story.append(_section_heading("II. DEDUCCIONES", styles))
-    story.append(_rows_table(_deducciones_rows(record, supplements), styles))
-    story.append(_total_row_table("TOTAL A DEDUCIR", _format_currency(total_deducir), styles))
-    story.append(Spacer(1, 5 * mm))
-
-    liquido_table = Table(
-        [[Paragraph("LÍQUIDO TOTAL A PERCIBIR", styles["total_label"]),
-          Paragraph(_format_currency(payroll.neto), styles["total_amount"])]],
-        colWidths=[120 * mm, 40 * mm],
-    )
-    liquido_table.setStyle(
-        TableStyle(
+    devengos_no_salariales = _devengos_no_salariales_rows(supplements)
+    devengos_flowables: list[Flowable] = [
+        _section_heading("I. DEVENGOS", styles),
+        _subsection_label("Percepciones salariales", styles),
+        Spacer(1, 1 * mm),
+        _rows_table(_devengos_salariales_rows(record, supplements), styles),
+    ]
+    # El subapartado de no salariales solo se añade si hay dietas este mes --
+    # nunca un título "Percepciones no salariales" seguido de una tabla vacía.
+    if devengos_no_salariales:
+        devengos_flowables.extend(
             [
-                ("BOX", (0, 0), (-1, -1), 1.0, colors.black),
-                ("BACKGROUND", (0, 0), (-1, -1), _TOTAL_BG),
-                ("LEFTPADDING", (0, 0), (-1, -1), 6),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-                ("TOPPADDING", (0, 0), (-1, -1), 6),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                Spacer(1, 2 * mm),
+                _subsection_label("Percepciones no salariales", styles),
+                Spacer(1, 1 * mm),
+                _rows_table(devengos_no_salariales, styles),
+            ]
+        )
+    devengos_flowables.append(
+        _total_row_table("TOTAL DEVENGADO (bruto del mes)", _format_currency(payroll.bruto_mes), styles)
+    )
+    story.append(KeepTogether(devengos_flowables))
+    story.append(Spacer(1, 3 * mm))
+
+    total_deducir = payroll.ss_employee_importe + payroll.irpf_importe + payroll.advances_total
+    story.append(
+        KeepTogether(
+            [
+                _section_heading("II. DEDUCCIONES", styles),
+                _rows_table(_deducciones_rows(record, supplements), styles),
+                _total_row_table("TOTAL A DEDUCIR", _format_currency(total_deducir), styles),
             ]
         )
     )
-    story.append(liquido_table)
-    story.append(Spacer(1, 6 * mm))
+    story.append(Spacer(1, 3 * mm))
 
-    story.append(_section_heading("Bases de cotización y aportación empresarial (simplificado)", styles))
-    story.append(Spacer(1, 1 * mm))
+    story.append(_liquido_band(_format_currency(payroll.neto), styles))
+    story.append(Spacer(1, 5 * mm))
+
     story.append(
-        Paragraph(
-            "Esta aplicación no desglosa por separado las bases de cotización ni la "
-            "aportación empresarial por contingencias comunes/profesionales, desempleo, "
-            "formación profesional o FOGASA — se muestran como cifras combinadas.",
-            styles["footer"],
+        KeepTogether(
+            [
+                _section_heading("Bases de cotización y aportación empresarial (simplificado)", styles),
+                Spacer(1, 1 * mm),
+                Paragraph(
+                    "Esta aplicación no desglosa por separado las bases de cotización ni la "
+                    "aportación empresarial por contingencias comunes/profesionales, desempleo, "
+                    "formación profesional o FOGASA — se muestran como cifras combinadas.",
+                    styles["footer"],
+                ),
+                Spacer(1, 2 * mm),
+                _rows_table(
+                    [
+                        (
+                            "Base sujeta a retención IRPF (aprox.)",
+                            # bruto_mes incluye las dietas (exentas); la base real de
+                            # IRPF/SS las excluye -- ver exempt_supplements_total en
+                            # app/payroll.py. Cuando no hay dietas este mes, ambas
+                            # cifras coinciden exactamente.
+                            _format_currency(payroll.bruto_mes - payroll.exempt_supplements_total),
+                        ),
+                        (
+                            "Aportación empresarial a la Seguridad Social "
+                            f"({_format_percentage(payroll.ss_employer_pct)}, cifra combinada)",
+                            _format_currency(payroll.ss_employer_importe),
+                        ),
+                        ("Coste total para la empresa", _format_currency(payroll.coste_total_empresa)),
+                    ],
+                    styles,
+                ),
+            ]
         )
     )
-    story.append(Spacer(1, 2 * mm))
-    bases_rows = [
-        ("Base sujeta a retención IRPF (aprox.)", _format_currency(payroll.bruto_mes)),
-        (
-            "Aportación empresarial a la Seguridad Social "
-            f"({_format_percentage(payroll.ss_employer_pct)}, cifra combinada)",
-            _format_currency(payroll.ss_employer_importe),
-        ),
-        ("Coste total para la empresa", _format_currency(payroll.coste_total_empresa)),
-    ]
-    story.append(_rows_table(bases_rows, styles))
-    story.append(Spacer(1, 8 * mm))
+    story.append(Spacer(1, 4 * mm))
 
+    # Solo la fecha de generación, sin repetir DISCLAIMER_TEXT (ya se ha
+    # mostrado una vez, de forma destacada, justo debajo del membrete --
+    # repetir el mismo aviso largo aquí abajo no añadía nada, solo alargaba
+    # el documento).
+    story.append(HRFlowable(width="100%", thickness=0.5, color=_BORDER, spaceAfter=3))
     story.append(
         Paragraph(
             f"Nómina generada el {record.generated_at.strftime('%d/%m/%Y a las %H:%M')} "
-            "por ContaApp RH. " + DISCLAIMER_TEXT,
+            "por ContaApp RH.",
             styles["footer"],
         )
     )

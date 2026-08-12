@@ -3262,6 +3262,7 @@ def _row_to_payroll_record(row: sqlite3.Row) -> PayrollRecord:
         paga_ordinaria=row["paga_ordinaria"],
         paga_extra=row["paga_extra"],
         supplements_total=row["supplements_total"],
+        exempt_supplements_total=row["exempt_supplements_total"],
         bruto_mes=row["bruto_mes"],
         irpf_pct=row["irpf_pct"],
         irpf_importe=row["irpf_importe"],
@@ -3324,7 +3325,7 @@ class PayrollRecordRepository:
         ss_employer_pct = (
             settings_row["ss_employer_pct"] if settings_row else DEFAULT_SS_EMPLOYER_PCT
         )
-        supplements_total, advances_total = PayrollSupplementRepository(
+        supplements_total, exempt_supplements_total, advances_total = PayrollSupplementRepository(
             self._conn
         ).totals_for_employee_month(employee_id, year, month)
 
@@ -3336,6 +3337,7 @@ class PayrollRecordRepository:
             month=month,
             year=year,
             supplements_total=supplements_total,
+            exempt_supplements_total=exempt_supplements_total,
             advances_total=advances_total,
             irpf_pct_override=irpf_pct_override,
         )
@@ -3346,10 +3348,11 @@ class PayrollRecordRepository:
                 INSERT INTO payroll_records (
                     employee_id, year, month, generated_at,
                     annual_gross_salary_snapshot, dependent_children_snapshot,
-                    paga_ordinaria, paga_extra, supplements_total, bruto_mes, irpf_pct,
+                    paga_ordinaria, paga_extra, supplements_total, exempt_supplements_total,
+                    bruto_mes, irpf_pct,
                     irpf_importe, ss_employee_pct, ss_employee_importe, advances_total, neto,
                     ss_employer_pct, ss_employer_importe, coste_total_empresa
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(employee_id, year, month) DO UPDATE SET
                     generated_at = excluded.generated_at,
                     annual_gross_salary_snapshot = excluded.annual_gross_salary_snapshot,
@@ -3357,6 +3360,7 @@ class PayrollRecordRepository:
                     paga_ordinaria = excluded.paga_ordinaria,
                     paga_extra = excluded.paga_extra,
                     supplements_total = excluded.supplements_total,
+                    exempt_supplements_total = excluded.exempt_supplements_total,
                     bruto_mes = excluded.bruto_mes,
                     irpf_pct = excluded.irpf_pct,
                     irpf_importe = excluded.irpf_importe,
@@ -3378,6 +3382,7 @@ class PayrollRecordRepository:
                     payroll.paga_ordinaria,
                     payroll.paga_extra,
                     payroll.supplements_total,
+                    payroll.exempt_supplements_total,
                     payroll.bruto_mes,
                     payroll.irpf_pct,
                     payroll.irpf_importe,
@@ -3663,16 +3668,19 @@ class PayrollSupplementRepository:
 
     def totals_for_employee_month(
         self, employee_id: int, year: int, month: int
-    ) -> tuple[float, float]:
-        """(supplements_total, advances_total): pluses+horas_extra sumados
+    ) -> tuple[float, float, float]:
+        """(supplements_total, exempt_supplements_total, advances_total):
+        pluses+horas_extra+bonos (sujetos a IRPF/SS) aparte de las dietas
+        (no sujetas -- ver el docstring de calculate_monthly_payroll()) y
         aparte de los anticipos, listos para pasar directamente a
         calculate_monthly_payroll()."""
         entries = self.list_for_employee_month(employee_id, year, month)
         supplements = sum(
-            e.amount for e in entries if e.supplement_type in ("plus", "horas_extra")
+            e.amount for e in entries if e.supplement_type in ("plus", "horas_extra", "bonos")
         )
+        exempt_supplements = sum(e.amount for e in entries if e.supplement_type == "dietas")
         advances = sum(e.amount for e in entries if e.supplement_type == "anticipo")
-        return round(supplements, 2), round(advances, 2)
+        return round(supplements, 2), round(exempt_supplements, 2), round(advances, 2)
 
     def list_all_for_employee(self, employee_id: int) -> list[PayrollSupplement]:
         rows = self._conn.execute(
