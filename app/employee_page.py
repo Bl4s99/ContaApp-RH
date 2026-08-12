@@ -60,12 +60,15 @@ _ACTIVE_FILTER_OPTIONS = ["Todos", "Activos", "Inactivos"]
 PHOTO_DISPLAY_SIZE = (120, 120)
 
 _COLUMNS: list[tuple[str, str, int]] = [
-    ("nombre", "Nombre", 120),
-    ("puesto", "Puesto", 85),
-    ("departamento", "Departamento", 90),
+    ("nombre", "Nombre", 130),
+    ("puesto", "Puesto", 110),
+    # "Departamento" (90px) no cabía ni siquiera con la propia cabecera
+    # más la flecha de orden -- se veía recortada a "Departamentc", como
+    # una errata real en vez de una columna apretada.
+    ("departamento", "Departamento", 125),
     ("salario", "Salario anual", 100),
     ("antiguedad", "Antigüedad", 90),
-    ("estado", "Estado", 55),
+    ("estado", "Estado", 60),
 ]
 _SORT_ARROW_ASC = " ▲"
 _SORT_ARROW_DESC = " ▼"
@@ -1600,21 +1603,16 @@ class EmployeeFichaPanel(ttk.Frame):
         row = self._add_entry_row(fields, row, "Apellido *", self.last_name_var)
         row = self._add_entry_row(fields, row, "DNI/NIE", self.dni_nie_var)
 
-        ttk.Label(fields, text="Fecha de nacimiento").grid(
-            row=row, column=0, sticky="w", pady=3
-        )
-        birth_date_row = ttk.Frame(fields)
-        birth_date_row.grid(row=row, column=1, sticky="w", pady=3)
+        row, birth_date_row = self._add_optional_date_row(fields, row, "Fecha de nacimiento")
         self.birth_date_entry = DateEntry(birth_date_row, max_date=date.today())
-        self.birth_date_entry.pack(side="left")
+        self.birth_date_entry.grid(row=0, column=0, sticky="w")
         self.no_birth_date_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
             birth_date_row,
             text="No indicada",
             variable=self.no_birth_date_var,
             command=self._handle_no_birth_date_toggled,
-        ).pack(side="left", padx=(8, 0))
-        row += 1
+        ).grid(row=0, column=1, sticky="w", padx=(8, 0))
 
         row = self._add_entry_row(fields, row, "Email *", self.email_var)
         row = self._add_entry_row(fields, row, "Teléfono", self.phone_var)
@@ -1634,7 +1632,7 @@ class EmployeeFichaPanel(ttk.Frame):
         self.department_combo = ttk.Combobox(
             fields,
             state="disabled" if self._locked_department_id is not None else "readonly",
-            width=30,
+            width=34,
         )
         self.department_combo.grid(row=row, column=1, sticky="w", pady=3)
         self.department_combo.bind(
@@ -1644,7 +1642,7 @@ class EmployeeFichaPanel(ttk.Frame):
 
         ttk.Label(fields, text="Turno").grid(row=row, column=0, sticky="w", pady=3)
         self.shift_combo = ttk.Combobox(
-            fields, state="readonly", width=30, values=[_NO_SHIFT_LABEL]
+            fields, state="readonly", width=34, values=[_NO_SHIFT_LABEL]
         )
         self.shift_combo.current(0)
         self.shift_combo.grid(row=row, column=1, sticky="w", pady=3)
@@ -1652,12 +1650,19 @@ class EmployeeFichaPanel(ttk.Frame):
 
         ttk.Label(fields, text="Supervisor directo").grid(row=row, column=0, sticky="w", pady=3)
         self.manager_combo = ttk.Combobox(
-            fields, state="readonly", width=30, values=[_NO_MANAGER_LABEL]
+            fields, state="readonly", width=34, values=[_NO_MANAGER_LABEL]
         )
         self.manager_combo.current(0)
         self.manager_combo.grid(row=row, column=1, sticky="w", pady=3)
         row += 1
 
+        # head_row con grid() interno (no pack(side="left") como antes, ni
+        # columnas 1/2 directas contra "fields" tampoco -- eso se probó y
+        # forzaba la columna 1 compartida por TODOS los Entry/Combobox de
+        # la ficha a comprimirse casi a 0, dejando en blanco Nombre/Email/
+        # etc.): mismo patrón ya usado para las filas de fecha opcional de
+        # más arriba, un frame propio con su propio grid(row=0,
+        # column=0/1) interno, que no compite por la columna 1 de "fields".
         ttk.Label(fields, text="Encargado/a de departamento").grid(
             row=row, column=0, sticky="w", pady=3
         )
@@ -1668,9 +1673,9 @@ class EmployeeFichaPanel(ttk.Frame):
             head_row,
             variable=self.is_department_head_var,
             command=self._handle_department_head_toggled,
-        ).pack(side="left")
+        ).grid(row=0, column=0, sticky="w")
         self.head_of_department_combo = ttk.Combobox(head_row, state="disabled", width=24)
-        self.head_of_department_combo.pack(side="left", padx=(6, 0))
+        self.head_of_department_combo.grid(row=0, column=1, sticky="w", padx=(6, 0))
         row += 1
 
         row = self._add_entry_row(fields, row, "Salario *", self.salary_var)
@@ -1691,56 +1696,49 @@ class EmployeeFichaPanel(ttk.Frame):
         )
         row += 1
 
-        ttk.Label(fields, text="Fecha de fin de contrato").grid(
-            row=row, column=0, sticky="w", pady=3
+        row, end_date_row = self._add_optional_date_row(
+            fields, row, "Fecha de fin de contrato"
         )
-        end_date_row = ttk.Frame(fields)
-        end_date_row.grid(row=row, column=1, sticky="w", pady=3)
         self.contract_end_date_entry = DateEntry(end_date_row)
-        self.contract_end_date_entry.pack(side="left")
+        self.contract_end_date_entry.grid(row=0, column=0, sticky="w")
         self.no_end_date_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
             end_date_row,
-            text="Sin fecha prevista",
+            # "Sin fecha" (no "Sin fecha prevista"): la propia etiqueta de
+            # la fila ya dice "Fecha de fin de contrato", así que el texto
+            # largo era redundante -- y a 19 caracteres era mucho más largo
+            # que "No indicada"/"Pendiente" de las otras filas de fecha
+            # opcional, sin motivo real, por lo que era la casilla que peor
+            # cabía.
+            text="Sin fecha",
             variable=self.no_end_date_var,
             command=self._handle_no_end_date_toggled,
-        ).pack(side="left", padx=(8, 0))
-        row += 1
+        ).grid(row=0, column=1, sticky="w", padx=(8, 0))
 
         row = self._add_entry_row(fields, row, "Cuenta bancaria (IBAN)", self.bank_account_var)
         row = self._add_entry_row(fields, row, "Núm. Seguridad Social", self.ss_number_var)
 
-        ttk.Label(fields, text="Próxima revisión médica").grid(
-            row=row, column=0, sticky="w", pady=3
-        )
-        checkup_row = ttk.Frame(fields)
-        checkup_row.grid(row=row, column=1, sticky="w", pady=3)
+        row, checkup_row = self._add_optional_date_row(fields, row, "Próxima revisión médica")
         self.next_medical_checkup_entry = DateEntry(checkup_row)
-        self.next_medical_checkup_entry.pack(side="left")
+        self.next_medical_checkup_entry.grid(row=0, column=0, sticky="w")
         self.no_medical_checkup_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
             checkup_row,
             text="No indicada",
             variable=self.no_medical_checkup_var,
             command=self._handle_no_medical_checkup_toggled,
-        ).pack(side="left", padx=(8, 0))
-        row += 1
+        ).grid(row=0, column=1, sticky="w", padx=(8, 0))
 
-        ttk.Label(fields, text="Fecha de formación PRL").grid(
-            row=row, column=0, sticky="w", pady=3
-        )
-        prl_row = ttk.Frame(fields)
-        prl_row.grid(row=row, column=1, sticky="w", pady=3)
+        row, prl_row = self._add_optional_date_row(fields, row, "Fecha de formación PRL")
         self.prl_training_entry = DateEntry(prl_row)
-        self.prl_training_entry.pack(side="left")
+        self.prl_training_entry.grid(row=0, column=0, sticky="w")
         self.no_prl_training_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
             prl_row,
             text="Pendiente",
             variable=self.no_prl_training_var,
             command=self._handle_no_prl_training_toggled,
-        ).pack(side="left", padx=(8, 0))
-        row += 1
+        ).grid(row=0, column=1, sticky="w", padx=(8, 0))
 
         ttk.Label(fields, text="Hijos a cargo").grid(row=row, column=0, sticky="w", pady=3)
         ttk.Spinbox(
@@ -1801,16 +1799,22 @@ class EmployeeFichaPanel(ttk.Frame):
         self.anonymize_button.grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 3))
         row += 1
 
-        vacation_row = ttk.Frame(fields)
-        vacation_row.grid(row=row, column=0, columnspan=2, sticky="w", pady=(10, 0))
-        self.vacation_balance_label = ttk.Label(vacation_row, text="", style="Muted.TLabel")
-        self.vacation_balance_label.pack(side="left")
+        # El texto del saldo es dinámico y puede ser largo ("Vacaciones 2026:
+        # usa 5 de 22 días (quedan 17)") -- en la misma fila que el botón,
+        # el conjunto no cabía y el botón (empaquetado el último) se recortaba
+        # a "Cor". Cada uno en su propia fila, mismo criterio ya aplicado a
+        # "Añadir equipo/Marcar como devuelto/Eliminar equipo" más abajo.
+        self.vacation_balance_label = ttk.Label(fields, text="", style="Muted.TLabel")
+        self.vacation_balance_label.grid(
+            row=row, column=0, columnspan=2, sticky="w", pady=(10, 0)
+        )
+        row += 1
         self.vacation_settings_button = ttk.Button(
-            vacation_row,
+            fields,
             text="Configurar días de vacaciones...",
             command=self._handle_open_vacation_settings,
         )
-        self.vacation_settings_button.pack(side="left", padx=(10, 0))
+        self.vacation_settings_button.grid(row=row, column=0, columnspan=2, sticky="w")
         if not self._is_admin:
             self.vacation_settings_button.state(["disabled"])
         row += 1
@@ -1862,9 +1866,9 @@ class EmployeeFichaPanel(ttk.Frame):
             height=4,
         )
         for col, label, width in [
-            ("filename", "Archivo", 160),
-            ("category", "Categoría", 90),
-            ("size", "Tamaño", 70),
+            ("filename", "Archivo", 170),
+            ("category", "Categoría", 100),
+            ("size", "Tamaño", 85),
             ("uploaded", "Subido el", 130),
         ]:
             self.documents_tree.heading(col, text=label)
@@ -1917,9 +1921,9 @@ class EmployeeFichaPanel(ttk.Frame):
             height=4,
         )
         for col, label, width in [
-            ("fecha", "Desde", 90),
-            ("puesto", "Puesto", 150),
-            ("salario", "Salario anual", 100),
+            ("fecha", "Desde", 95),
+            ("puesto", "Puesto", 160),
+            ("salario", "Salario anual", 115),
             ("nota", "Nota", 130),
         ]:
             self.history_tree.heading(col, text=label)
@@ -1947,11 +1951,11 @@ class EmployeeFichaPanel(ttk.Frame):
             height=4,
         )
         for col, label, width in [
-            ("fecha", "Fecha", 85),
-            ("gravedad", "Gravedad", 75),
-            ("baja", "Con baja", 65),
-            ("notificado", "Notificado", 75),
-            ("descripcion", "Descripción", 150),
+            ("fecha", "Fecha", 95),
+            ("gravedad", "Gravedad", 100),
+            ("baja", "Con baja", 95),
+            ("notificado", "Notificado", 105),
+            ("descripcion", "Descripción", 160),
         ]:
             self.accidents_tree.heading(col, text=label)
             self.accidents_tree.column(col, width=width, anchor="w")
@@ -1994,9 +1998,9 @@ class EmployeeFichaPanel(ttk.Frame):
         )
         for col, label, width in [
             ("contingencia", "Contingencia", 130),
-            ("baja", "Fecha de baja", 85),
-            ("confirmacion", "Confirmación", 85),
-            ("alta", "Alta", 85),
+            ("baja", "Fecha de baja", 100),
+            ("confirmacion", "Confirmación", 105),
+            ("alta", "Alta", 90),
         ]:
             self.it_episodes_tree.heading(col, text=label)
             self.it_episodes_tree.column(col, width=width, anchor="w")
@@ -2041,8 +2045,8 @@ class EmployeeFichaPanel(ttk.Frame):
         )
         for col, label, width in [
             ("nombre", "Nombre", 190),
-            ("finalizacion", "Finalización", 90),
-            ("caducidad", "Caducidad", 90),
+            ("finalizacion", "Finalización", 105),
+            ("caducidad", "Caducidad", 100),
         ]:
             self.trainings_tree.heading(col, text=label)
             self.trainings_tree.column(col, width=width, anchor="w")
@@ -2076,11 +2080,14 @@ class EmployeeFichaPanel(ttk.Frame):
         row += 1
         ttk.Label(
             fields,
-            text="Un PIN de 4-6 dígitos que el propio empleado usa, junto a su\n"
-            "email, para consultar su nómina, saldo de vacaciones y fichajes\n"
-            "desde la ventana de inicio de sesión, sin necesitar una cuenta.",
+            text=(
+                "Un PIN de 4-6 dígitos que el propio empleado usa, junto a su "
+                "email, para consultar su nómina, saldo de vacaciones y fichajes "
+                "desde la ventana de inicio de sesión, sin necesitar una cuenta."
+            ),
             style="Muted.TLabel",
             justify="left",
+            wraplength=380,
         ).grid(row=row, column=0, columnspan=2, sticky="w")
         row += 1
 
@@ -2123,7 +2130,7 @@ class EmployeeFichaPanel(ttk.Frame):
         )
         for col, label, width in [
             ("titulo", "Título", 190),
-            ("fecha", "Fecha objetivo", 100),
+            ("fecha", "Fecha objetivo", 125),
             ("estado", "Estado", 90),
         ]:
             self.objectives_tree.heading(col, text=label)
@@ -2168,7 +2175,7 @@ class EmployeeFichaPanel(ttk.Frame):
             selectmode="browse",
             height=4,
         )
-        for col, label, width in [("fecha", "Fecha", 90), ("comentarios", "Comentarios", 290)]:
+        for col, label, width in [("fecha", "Fecha", 100), ("comentarios", "Comentarios", 290)]:
             self.reviews_tree.heading(col, text=label)
             self.reviews_tree.column(col, width=width, anchor="w")
         reviews_vsb = ttk.Scrollbar(
@@ -2211,8 +2218,8 @@ class EmployeeFichaPanel(ttk.Frame):
         )
         for col, label, width in [
             ("descripcion", "Descripción", 190),
-            ("entrega", "Fecha entrega", 100),
-            ("devolucion", "Fecha devolución", 100),
+            ("entrega", "Fecha entrega", 115),
+            ("devolucion", "Fecha devolución", 140),
         ]:
             self.equipment_tree.heading(col, text=label)
             self.equipment_tree.column(col, width=width, anchor="w")
@@ -2249,10 +2256,42 @@ class EmployeeFichaPanel(ttk.Frame):
         self, parent: ttk.Frame, row: int, label: str, var: tk.StringVar
     ) -> int:
         ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=3)
-        ttk.Entry(parent, textvariable=var, width=34).grid(
+        # 38, no 34: con el panel de ficha ya ensanchado (ver _build_widgets
+        # del EmployeePage) sigue habiendo sitio de sobra, y un IBAN
+        # completo ("ES91 2100 0418 4502 0005 1332", 29 caracteres) o un
+        # email largo necesitaban más margen del que 34 daba.
+        ttk.Entry(parent, textvariable=var, width=38).grid(
             row=row, column=1, sticky="w", pady=3
         )
         return row + 1
+
+    def _add_optional_date_row(
+        self, parent: ttk.Frame, row: int, label: str
+    ) -> tuple[int, ttk.Frame]:
+        """Coloca la etiqueta y un frame propio (con su propio grid()
+        interno) para un DateEntry + casilla (fecha de nacimiento, fin de
+        contrato, revisión médica, formación PRL) -- el DateEntry y la
+        casilla en sí los construye cada llamador contra el frame
+        devuelto, ya que cada uno necesita su propia variable/callback/
+        kwargs. El frame usa grid(), no pack(side="left") como antes: con
+        pack(), cuando la columna se quedaba sin ancho suficiente, Tk
+        directamente dejaba de dibujar la casilla (el último hijo
+        empaquetado) en vez de encogerla -- desaparecía del todo, no solo
+        se recortaba.
+
+        Nota: se probó también poner el DateEntry y la casilla como
+        columnas 1/2 directas de `parent` (protegiendo la casilla de
+        cualquier compresión, ya que una columna del grid sin weight
+        nunca se sacrifica) -- pero eso hacía que la columna 1, compartida
+        por TODOS los Entry/Combobox de la ficha, se comprimiera casi a 0
+        para poder darle a la casilla su ancho natural en la columna 2,
+        dejando en blanco Nombre/Email/Puesto/etc. Con el frame propio
+        (como aquí), el DateEntry y la casilla compiten solo entre ellos
+        dos, no con el resto de la ficha."""
+        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=3)
+        date_row = ttk.Frame(parent)
+        date_row.grid(row=row, column=1, sticky="w", pady=3)
+        return row + 1, date_row
 
     def reload_departments(self) -> None:
         self._departments = self._repos.departments.list_all()
@@ -3517,12 +3556,20 @@ class EmployeePage(ttk.Frame):
 
     def _build_widgets(self) -> None:
         # Panedwindow (no pack de ancho fijo) para que el usuario pueda
-        # arrastrar el separador y ver el contenido de columnas largas
-        # (Puesto, Departamento) que a veces queda truncado a 580px.
+        # arrastrar el separador. 660px (no 580): con las columnas
+        # Puesto/Departamento ensanchadas (ver _COLUMNS) 580 se quedaba
+        # corto incluso para las propias cabeceras ("Departamento" con su
+        # flecha de orden no cabía en 90px); 660 es la suma real de las 6
+        # columnas más el margen del propio Treeview (scrollbar + padding),
+        # verificado en vivo tras el primer intento a 620 quedarse aún
+        # unos px corto. Sigue sin caber cualquier valor largo posible --
+        # para eso el usuario puede seguir arrastrando el separador, o cada
+        # columna del Treeview por su cuenta -- pero ya no recorta la
+        # cabecera en sí.
         self._paned = ttk.Panedwindow(self, orient="horizontal")
         self._paned.pack(side="top", fill="both", expand=True)
 
-        list_frame = ttk.Frame(self._paned, padding=(12, 12, 6, 12), width=580)
+        list_frame = ttk.Frame(self._paned, padding=(12, 12, 6, 12), width=660)
         self._paned.add(list_frame, weight=0)
         list_frame.pack_propagate(False)
 
@@ -3597,6 +3644,13 @@ class EmployeePage(ttk.Frame):
             locked_department_id=self._locked_department_id,
             is_admin=self._is_admin,
         )
+        # Sin minsize (a diferencia de la vieja tk.PanedWindow, ttk::panedwindow
+        # solo acepta "weight" como opción de panel -- comprobado contra el
+        # propio docstring de tkinter.ttk.Panedwindow.pane() antes de
+        # insistir, tras dos intentos fallidos con TclError): el usuario
+        # puede seguir arrastrando el separador libremente, igual que
+        # siempre. El ancho por defecto ya mejorado (ventana 1360x760 +
+        # lista fija a 620px) es lo que evita el caso realmente reportado.
         self._paned.add(self.ficha, weight=1)
 
     def apply_theme_change(self) -> None:

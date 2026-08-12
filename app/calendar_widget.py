@@ -159,7 +159,13 @@ class DateEntry(ttk.Frame):
         self._min_date = min_date
         self._marked_dates = marked_dates
         self.value_var = tk.StringVar(value=(initial or date.today()).isoformat())
-        self.entry = ttk.Entry(self, textvariable=self.value_var, width=24, state="readonly")
+        # width=11, no 24: el contenido siempre es una fecha ISO de 10
+        # caracteres exactos ("2026-08-11"), de solo lectura -- 24 sobraba
+        # de más y era el motivo real (no el ancho del panel que lo
+        # contiene) de que la casilla junto a cada DateEntry opcional se
+        # recortara o desapareciera en paneles estrechos como la ficha de
+        # empleado.
+        self.entry = ttk.Entry(self, textvariable=self.value_var, width=11, state="readonly")
         self.entry.pack(side="left")
         self.picker_button = ttk.Button(
             self, text="\U0001F4C5", width=3, command=self._open_picker
@@ -365,10 +371,17 @@ class ScrollableFrame(ttk.Frame):
     cualquier dirección), aquí el ancho del contenido interior se ajusta
     siempre al del canvas -- nunca aparece una barra horizontal."""
 
-    def __init__(self, parent: tk.Misc, bg: str = "SystemButtonFace") -> None:
+    def __init__(
+        self,
+        parent: tk.Misc,
+        bg: str = "SystemButtonFace",
+        scrollbar_style: str = "Vertical.TScrollbar",
+    ) -> None:
         super().__init__(parent)
         self.canvas = tk.Canvas(self, highlightthickness=0, bg=bg)
-        vsb = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+        vsb = ttk.Scrollbar(
+            self, orient="vertical", command=self.canvas.yview, style=scrollbar_style
+        )
         self.inner = tk.Frame(self.canvas, bg=bg)
         self._inner_window = self.canvas.create_window((0, 0), window=self.inner, anchor="nw")
         self.inner.bind(

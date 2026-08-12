@@ -1007,7 +1007,20 @@ class MainWindow(tk.Tk):
         )
         apply_theme(self, repos.app_settings.get_theme_mode())
         self.title("ContaApp RH")
-        self.geometry("1200x680")
+        # 1450x760 (no 1200x680): a 1200x680 el panel de la ficha de
+        # empleado se quedaba con menos de 400px reales una vez restados la
+        # barra lateral (210px fijos) y la lista (ancho fijo), y la mayoría
+        # de campos/columnas se recortaban de forma severa -- verificado en
+        # vivo, paso a paso (1360, luego 1400), que el texto de la casilla
+        # junto a cada fecha opcional (Fecha de nacimiento, etc.) seguía
+        # cortándose contra el borde del panel; 1450 (junto con acortar el
+        # texto más largo de esas casillas, ver "Sin fecha" en
+        # EmployeeFichaPanel) es lo que por fin lo resuelve del todo.
+        # Bastante más ancho que un portátil de 1366x768 (el suelo habitual
+        # más bajo) -- se prefirió esto a dejar esas casillas a medio
+        # cortar. minsize se queda igual: es el suelo si alguien encoge la
+        # ventana a mano, no el tamaño de arranque.
+        self.geometry("1450x760")
         self.minsize(1000, 580)
 
         self._departments: list[Department] = []
@@ -1040,7 +1053,11 @@ class MainWindow(tk.Tk):
         # puede tener más botones de los que caben en alto -- sin esto,
         # los últimos (Modo oscuro, Exportar CSV, Salir) quedarían fuera de
         # la vista y sin forma de alcanzarlos.
-        self._sidebar_scroll = ScrollableFrame(self._sidebar, bg=theme.current().primary_dark)
+        self._sidebar_scroll = ScrollableFrame(
+            self._sidebar,
+            bg=theme.current().primary_dark,
+            scrollbar_style="Sidebar.Vertical.TScrollbar",
+        )
         self._sidebar_scroll.pack(fill="both", expand=True)
 
         container = ttk.Frame(self._main_paned)

@@ -9,7 +9,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from app import theme, validation
-from app.calendar_widget import MONTH_NAMES, DateEntry, shift_month
+from app.calendar_widget import MONTH_NAMES, DateEntry, ScrollableFrame, shift_month
 from app.gestoria_export import build_gestoria_rows, write_gestoria_csv
 from app.models import Department, Employee
 from app.payroll import MonthlyPayroll, calculate_monthly_payroll, estimate_irpf_withholding_rate
@@ -673,8 +673,16 @@ class PayrollPage(ttk.Frame):
 
         ttk.Separator(body, orient="vertical").pack(side="left", fill="y")
 
-        detail_frame = ttk.Frame(body, padding=12)
-        detail_frame.pack(side="left", fill="both", expand=True)
+        # ScrollableFrame (mismo componente que ya usa la ficha de empleado):
+        # sin esto, "Histórico generado" y su tabla quedaban completamente
+        # inalcanzables en cuanto el contenido del panel (desglose + tabla de
+        # complementos + tabla de histórico) superaba el alto de la ventana,
+        # sin ninguna barra de scroll que lo remediara.
+        detail_scroll = ScrollableFrame(body, bg=theme.current().bg)
+        detail_scroll.pack(side="left", fill="both", expand=True)
+        self._detail_scroll = detail_scroll
+        detail_frame = ttk.Frame(detail_scroll.inner, padding=12)
+        detail_frame.pack(side="top", fill="both", expand=True)
 
         month_row = ttk.Frame(detail_frame)
         month_row.pack(side="top", anchor="w")
@@ -731,14 +739,16 @@ class PayrollPage(ttk.Frame):
         )
         self.employee_heading.pack(side="top", anchor="w", pady=(10, 4))
 
-        status_row = ttk.Frame(detail_frame)
-        status_row.pack(side="top", anchor="w", fill="x", pady=(0, 6))
-        self.record_status_label = ttk.Label(status_row, text="", style="Muted.TLabel")
-        self.record_status_label.pack(side="left")
+        # Cada botón en su propia fila (mismo criterio ya usado en la ficha
+        # de empleado, ver employee_page.py): la etiqueta de estado más los
+        # tres botones juntos no cabían, y "Imprimir" -- el último
+        # empaquetado -- se recortaba a "Im".
+        self.record_status_label = ttk.Label(detail_frame, text="", style="Muted.TLabel")
+        self.record_status_label.pack(side="top", anchor="w", pady=(0, 4))
         self.generate_button = ttk.Button(
-            status_row, text="Generar nómina de este mes", command=self._handle_generate
+            detail_frame, text="Generar nómina de este mes", command=self._handle_generate
         )
-        self.generate_button.pack(side="left", padx=(10, 0))
+        self.generate_button.pack(side="top", anchor="w", pady=(0, 2))
         # Sin restringir a administradores (a diferencia de "Configurar %
         # Seguridad Social.../Exportar SEPA.../Exportar para gestoría..."):
         # sigue el mismo criterio que "Generar nómina de este mes", que
@@ -746,13 +756,13 @@ class PayrollPage(ttk.Frame):
         # es la acción natural que sigue a generarla, no una acción de toda
         # la empresa.
         self.download_pdf_button = ttk.Button(
-            status_row, text="Descargar PDF...", command=self._handle_download_pdf
+            detail_frame, text="Descargar PDF...", command=self._handle_download_pdf
         )
-        self.download_pdf_button.pack(side="left", padx=(6, 0))
+        self.download_pdf_button.pack(side="top", anchor="w", pady=(0, 2))
         self.print_button = ttk.Button(
-            status_row, text="Imprimir", command=self._handle_print_pdf
+            detail_frame, text="Imprimir", command=self._handle_print_pdf
         )
-        self.print_button.pack(side="left", padx=(6, 0))
+        self.print_button.pack(side="top", anchor="w", pady=(0, 6))
 
         self.breakdown_frame = ttk.Frame(detail_frame)
         self.breakdown_frame.pack(side="top", anchor="w", fill="x")
@@ -818,9 +828,12 @@ class PayrollPage(ttk.Frame):
         """El aviso de Nóminas es un tk.Label con color fijado directamente
         (para poder elegir un amarillo de aviso que no es parte de la paleta
         ttk), así que no se actualiza solo con apply_theme() -- hay que
-        reconfigurarlo a mano tras un cambio de tema en caliente."""
+        reconfigurarlo a mano tras un cambio de tema en caliente. Lo mismo
+        para el fondo del ScrollableFrame del panel de detalle (mismo motivo
+        que EmployeeFichaPanel.apply_theme_change())."""
         palette = theme.current()
         self._banner.configure(background=palette.disclaimer_bg, foreground=palette.disclaimer_fg)
+        self._detail_scroll.set_bg(palette.bg)
 
     def reload_departments(self) -> None:
         self._departments = self._repos.departments.list_all()

@@ -166,7 +166,20 @@ def apply_theme(root: tk.Tk, mode: str = "light") -> None:
         bordercolor=[("active", p.primary_light), ("pressed", p.primary_dark)],
     )
 
-    style.configure("TEntry", fieldbackground=p.surface, bordercolor=p.border, foreground=p.text)
+    # lightcolor/darkcolor tambien, no solo bordercolor -- el tema "clam" de
+    # fabrica dibuja un bisel de 2 capas alrededor del campo (borde +
+    # sombreado 3D); sin fijar las dos, el sombreado se queda en su gris
+    # claro por defecto y se ve como un contorno casi blanco pegado al
+    # campo en modo oscuro (invisible en claro, donde ese gris por defecto
+    # ya se parece al fondo de página).
+    style.configure(
+        "TEntry",
+        fieldbackground=p.surface,
+        bordercolor=p.border,
+        foreground=p.text,
+        lightcolor=p.border,
+        darkcolor=p.border,
+    )
     style.map("TEntry", bordercolor=[("focus", p.primary_light)])
 
     style.configure(
@@ -187,7 +200,15 @@ def apply_theme(root: tk.Tk, mode: str = "light") -> None:
     root.option_add("*TCombobox*Listbox.selectBackground", p.primary_light)
     root.option_add("*TCombobox*Listbox.selectForeground", "#ffffff")
 
-    style.configure("TSpinbox", fieldbackground=p.surface, bordercolor=p.border, foreground=p.text)
+    # Mismo motivo que TEntry justo arriba (bisel de clam sin fijar).
+    style.configure(
+        "TSpinbox",
+        fieldbackground=p.surface,
+        bordercolor=p.border,
+        foreground=p.text,
+        lightcolor=p.border,
+        darkcolor=p.border,
+    )
 
     style.configure("TSeparator", background=p.border)
 
@@ -198,7 +219,13 @@ def apply_theme(root: tk.Tk, mode: str = "light") -> None:
     style.configure("TPanedwindow", background=p.bg)
     style.configure("Sash", sashthickness=6, gripcount=0, background=p.border)
 
-    style.configure("TLabelframe", background=p.bg, bordercolor=p.border)
+    # lightcolor/darkcolor tambien -- mismo bisel de clam sin fijar que
+    # TEntry/TSpinbox arriba, aqui se veia como una linea casi blanca justo
+    # dentro del borde de cada Labelframe ("Accesos rapidos" en Inicio,
+    # "Fichar ahora" en Fichajes) en modo oscuro.
+    style.configure(
+        "TLabelframe", background=p.bg, bordercolor=p.border, lightcolor=p.border, darkcolor=p.border
+    )
     style.configure("TLabelframe.Label", background=p.bg, foreground=p.heading_text)
 
     style.configure(
@@ -224,12 +251,23 @@ def apply_theme(root: tk.Tk, mode: str = "light") -> None:
     )
     style.map("Treeview.Heading", background=[("active", p.primary)])
 
+    # lightcolor/darkcolor tambien -- mismo bisel de clam sin fijar que
+    # TEntry/TSpinbox/TLabelframe de mas arriba: sin ellos, el pulgar se
+    # quedaba con el bisel gris claro por defecto en vez del oscuro
+    # configurado, como un pulgar casi blanco flotando sobre una tabla
+    # oscura. La barra horizontal (justo debajo) no lo necesita -- verificado
+    # con muestreo de pixeles que ya toma bordercolor/troughcolor
+    # correctamente sin fijar lightcolor/darkcolor, a diferencia de la
+    # vertical -- así que se deja tal cual en vez de tocar algo que ya
+    # funciona.
     style.configure(
         "Vertical.TScrollbar",
         background=p.border,
         troughcolor=p.bg,
         bordercolor=p.bg,
         arrowcolor=p.text_muted,
+        lightcolor=p.border,
+        darkcolor=p.border,
     )
     style.configure(
         "Horizontal.TScrollbar",
@@ -278,6 +316,25 @@ def apply_theme(root: tk.Tk, mode: str = "light") -> None:
         bordercolor=[("active", p.primary), ("pressed", p.primary)],
         foreground=[("active", "#ffffff")],
     )
+
+    # La barra de scroll de la barra lateral (ver ScrollableFrame en
+    # calendar_widget.py) NO puede usar el "Vertical.TScrollbar" genérico de
+    # más abajo: ese usa troughcolor=p.bg (fondo claro de página normal),
+    # que sobre el fondo oscuro de la barra lateral se veía como una tira
+    # clara pegada al filo, como si estuviera mal encajada. text_on_dark_muted
+    # es el mismo tono ya usado para el resto de texto secundario sobre
+    # primary_dark (SidebarMuted.TLabel/SidebarSection.TLabel), así que el
+    # deslizador queda visible pero no compite con los botones.
+    style.configure(
+        "Sidebar.Vertical.TScrollbar",
+        background=p.text_on_dark_muted,
+        troughcolor=p.primary_dark,
+        bordercolor=p.primary_dark,
+        arrowcolor=p.primary_dark,
+        lightcolor=p.text_on_dark_muted,
+        darkcolor=p.text_on_dark_muted,
+    )
+    style.map("Sidebar.Vertical.TScrollbar", background=[("active", p.primary_light)])
 
     # --- Tarjetas (Inicio) y encabezados de página --------------------------
     style.configure(
