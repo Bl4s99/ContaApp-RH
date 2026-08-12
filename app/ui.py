@@ -16,6 +16,7 @@ from app.backup import BackupInfo, BackupRepository, format_backup_size
 from app.calendar_page import CalendarPage
 from app.calendar_widget import ScrollableFrame, ToggleSwitch
 from app.candidates_ui import CandidatesPage
+from app.changelog_page import ChangelogPage
 from app.collective_agreement_ui import CollectiveAgreementManagerDialog
 from app.cost_report_ui import CostReportPage
 from app.db_engine import check_db_connection, read_configured_db_url, write_configured_db_url
@@ -1097,6 +1098,7 @@ class MainWindow(tk.Tk):
         self._alerts_page = AlertsPage(
             container, self._repos, locked_department_id=self._locked_department_id
         )
+        self._changelog_page = ChangelogPage(container)
         self._welcome_page = WelcomePage(
             container,
             self._repos,
@@ -1122,6 +1124,7 @@ class MainWindow(tk.Tk):
             "fichajes": self._time_clock_page,
             "solicitudes": self._absence_requests_page,
             "alertas": self._alerts_page,
+            "versiones": self._changelog_page,
         }
         # No se grid()-ean aquí todas a la vez: _show_page() se encarga de
         # gestionar con grid()/grid_remove() solo la página activa (ver el
@@ -1148,6 +1151,12 @@ class MainWindow(tk.Tk):
             sidebar,
             text="Mi cuenta...",
             command=self._open_account_settings,
+            style="Sidebar.TButton",
+        ).pack(fill="x", padx=10, pady=2)
+        ttk.Button(
+            sidebar,
+            text="Historial de versiones",
+            command=lambda: self._show_page("versiones"),
             style="Sidebar.TButton",
         ).pack(fill="x", padx=10, pady=2)
 
@@ -1391,6 +1400,7 @@ class MainWindow(tk.Tk):
         self._alerts_page.apply_theme_change()
         self._employee_page.apply_theme_change()
         self._welcome_page.apply_theme_change()
+        self._changelog_page.apply_theme_change()
         palette = theme.current()
         self._theme_toggle.set_colors(
             bg=palette.primary_dark,

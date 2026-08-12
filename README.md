@@ -43,7 +43,7 @@ Genera `empleados_ficticios.csv` (50 empleados ficticios, editable) y carga ese 
 - **Importante — qué protege y qué no**: este inicio de sesión (y la separación por roles) es una puerta de entrada a la interfaz, no un cifrado de los datos. `empleados.db` sigue siendo un archivo SQLite normal: cualquiera con acceso al ordenador y un lector de SQLite puede abrirlo directamente sin pasar por el login ni por las restricciones de rol. Es útil para que un vistazo casual a la pantalla no muestre datos de nóminas o del calendario de otros departamentos, pero no sustituye a proteger el propio equipo (usuario de Windows con contraseña, disco cifrado, etc.) si eso es lo que se necesita.
 
 **Navegación**
-- Una sola ventana: la barra lateral (no menú superior) cambia el contenido de la misma ventana, nunca abre ventanas nuevas para navegar. Tiene un acceso a **Inicio** y **Alertas** arriba, y dos secciones grandes:
+- Una sola ventana: la barra lateral (no menú superior) cambia el contenido de la misma ventana, nunca abre ventanas nuevas para navegar. Tiene un acceso a **Inicio**, **Alertas**, **Mi cuenta...** e **Historial de versiones** arriba, y dos secciones grandes:
   - **EMPLEADOS** → Lista de empleados, Nóminas, Coste de personal, Plantillas de documentos..., Tareas de incorporación..., Candidatos, Organigrama, Departamentos (solo administradores), Gestionar usuarios... (solo administradores).
   - **CALENDARIO** → Calendario laboral (un botón por departamento — solo el propio si es un encargado), Fichajes, Solicitudes de ausencia, Tipos de día, Festivos...
   - Además, Exportar CSV y Salir.
@@ -75,6 +75,9 @@ Genera `empleados_ficticios.csv` (50 empleados ficticios, editable) y carga ese 
 - El resumen se envía **al abrir la app**, como muy pronto una vez por semana desde el último envío — no hay ningún proceso en segundo plano independiente de la app. Si el envío falla (credenciales incorrectas, sin conexión...), se avisa una vez abierta la ventana principal, sin bloquear el arranque — igual que un fallo de copia de seguridad.
 - La contraseña de aplicación se guarda en la base de datos local de la app, con el mismo nivel de protección que el resto de datos sensibles ya guardados ahí (IBAN, DNI/NIE) — no cifrado aparte. Se explica así, sin adornos, en el propio diálogo de "Mi cuenta...".
 - **Aviso por correo si la aplicación falla**: casilla independiente del resumen semanal ("Avisarme por correo si la aplicación falla en este ordenador"), deshabilitada hasta que hay un correo conectado, porque reutiliza esa misma conexión para enviar el aviso — sin credenciales nuevas que gestionar. Cubre tanto una excepción no controlada fuera de la interfaz (arranque, por ejemplo) como dentro de cualquier callback (clic de un botón, etc.), y se envía en segundo plano para no congelar la ventana mientras se conecta al SMTP. El correo **nunca** incluye el mensaje ni la traza del error — solo el tipo de excepción y cuándo ocurrió —, porque a diferencia del registro local (que nunca sale de este ordenador) esto sí sale por correo, y algunos mensajes de error de esta app incluyen a propósito un valor identificativo real (ver el aviso de privacidad en `app/logging_config.py`); el detalle completo se sigue consultando en el registro local de ese ordenador.
+
+**Historial de versiones**
+- Pantalla de solo lectura ("Historial de versiones" en la barra lateral, junto a Inicio/Alertas/Mi cuenta) con todas las versiones publicadas de ContaApp RH y qué trajo cada una, de la más reciente a la primera — la versión que se está ejecutando se marca como "actual". El contenido vive en `app/changelog.py` (dato estático, sin consultas a la base de datos): cada versión nueva antepone su propia entrada, el historial nunca se reescribe. La misma web de contaapp.es tiene su propia página equivalente (`/versiones-rh`), mantenida a mano en sincronía con esta.
 
 **Empleados**
 - Lista con búsqueda (nombre, email, puesto), filtros por departamento y estado, columnas de **Salario anual** (formato español, ej. "32.500,50 €") y **Antigüedad** (calculada desde la fecha de ingreso, ej. "2 años, 3 meses"), y **ordenación por columnas**: clic en cualquier cabecera (Nombre, Puesto, Departamento, Salario anual, Antigüedad, Estado) ordena ascendente, un segundo clic invierte a descendente (indicador ▲/▼ en la cabecera activa) — junto a una **ficha de empleado** donde se ve y edita toda su información en el mismo sitio: no hay un formulario aparte para crear/editar.
@@ -343,6 +346,8 @@ app/
   absence_requests_ui.py Página de Solicitudes de ausencia: lista de pendientes, aprobar/rechazar
   alerts.py             Cálculo puro de alertas: contratos por vencer, cumpleaños próximos, revisiones médicas próximas o vencidas, formación PRL pendiente, certificaciones próximas a caducar y revisión de retención RGPD para empleados de baja
   alerts_ui.py           Página de Alertas: lista combinada de las cinco, vencidas resaltadas en rojo
+  changelog.py           Historial de versiones publicadas de la app (dato estático, ver "Historial de versiones" más arriba)
+  changelog_page.py      Página de Historial de versiones: una sección por versión, marca la que se está ejecutando como actual
 main.py               Punto de entrada (seeds iniciales + login + envío del resumen semanal si corresponde, antes de la ventana principal)
 scripts/              Utilidades de desarrollo (generación de datos de prueba)
 tests/                Pruebas automatizadas (validación, repositorios, widgets, fotos, nómina)
