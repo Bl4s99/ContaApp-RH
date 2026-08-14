@@ -20,3 +20,7 @@ dist/
 # Generado por ContaApp RH.spec en cada build a partir de app/version.py --
 # no tiene sentido mantener dos copias del número de versión.
 version_info.txt
+
+# BD ficticia para los scripts video*.py (grabación de vídeos cortos) --
+# se regenera con generar_datos_demo.py, no tiene sentido versionarla.
+scripts/video_demo.db

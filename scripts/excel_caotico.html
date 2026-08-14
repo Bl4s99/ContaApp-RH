@@ -1,0 +1,197 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    width: 1080px;
+    height: 1080px;
+    background: #fff;
+    font-family: Calibri, "Segoe UI", Arial, sans-serif;
+    display: flex;
+    flex-direction: column;
+  }
+  .toolbar {
+    background: #f3f3f3;
+    border-bottom: 1px solid #d0d0d0;
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 15px;
+    color: #444;
+  }
+  .toolbar .title { font-weight: 600; color: #217346; }
+  .toolbar .fname { color: #666; }
+  .formula-bar {
+    background: #fff;
+    border-bottom: 1px solid #d0d0d0;
+    padding: 6px 16px;
+    font-size: 14px;
+    color: #666;
+    display: flex;
+    gap: 10px;
+  }
+  .formula-bar .cellref {
+    font-weight: 600;
+    width: 40px;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    table-layout: fixed;
+    font-size: 15px;
+  }
+  th, td {
+    border: 1px solid #d9d9d9;
+    padding: 10px 6px;
+    text-align: center;
+    color: #222;
+    height: 44px;
+  }
+  th {
+    background: #f3f3f3;
+    color: #666;
+    font-weight: 500;
+  }
+  td.rowhead {
+    background: #f3f3f3;
+    color: #666;
+    width: 34px;
+  }
+  td.name {
+    text-align: left;
+    padding-left: 12px;
+    font-weight: 600;
+    background: #fafafa;
+  }
+  .vac { background: #d9ead3; }
+  .manana { background: #fff2cc; }
+  .tarde { background: #cfe2f3; }
+  .libre { background: #fce5cd; }
+  .conflict {
+    background: #f4cccc;
+    position: relative;
+  }
+  .conflict .old {
+    text-decoration: line-through;
+    color: #a11;
+    display: block;
+    font-size: 12px;
+  }
+  .conflict .new {
+    display: block;
+    font-weight: 700;
+    color: #a11;
+  }
+  .selected {
+    outline: 2.5px solid #217346;
+    outline-offset: -2.5px;
+    position: relative;
+    z-index: 1;
+  }
+  .note {
+    position: absolute;
+    background: #fff8b0;
+    border: 1px solid #e0c200;
+    font-size: 11px;
+    padding: 4px 6px;
+    color: #444;
+    transform: rotate(-2deg);
+    box-shadow: 1px 2px 4px rgba(0,0,0,0.15);
+    font-family: "Comic Sans MS", cursive;
+  }
+  .wrap { position: relative; flex: 1; }
+</style>
+</head>
+<body>
+  <div class="toolbar">
+    <span class="title">Turnos_equipo_DEFINITIVO_v3</span>
+    <span class="fname">(2)_ULTIMO_de_verdad.xlsx — Compartido con 6 personas</span>
+  </div>
+  <div class="formula-bar">
+    <span class="cellref">D7</span>
+    <span>fx</span>
+    <span>Vacaciones (¿confirmado? preguntar a Marta)</span>
+  </div>
+  <div class="wrap">
+  <table>
+    <tr>
+      <th></th>
+      <th>Lun</th>
+      <th>Mar</th>
+      <th>Mié</th>
+      <th>Jue</th>
+      <th>Vie</th>
+      <th>Sáb</th>
+    </tr>
+    <tr>
+      <td class="rowhead">2</td>
+      <td class="name">Ana</td>
+      <td class="manana">Mañana</td>
+      <td class="manana">Mañana</td>
+      <td class="vac">Vacaciones</td>
+      <td class="vac">Vacaciones</td>
+      <td class="tarde">Tarde</td>
+      <td></td>
+    </tr>
+    <tr>
+      <td class="rowhead">3</td>
+      <td class="name">Javier</td>
+      <td class="tarde">Tarde</td>
+      <td class="tarde">Tarde</td>
+      <td class="manana">Mañana</td>
+      <td class="manana">Mañana</td>
+      <td class="libre">Libre</td>
+      <td></td>
+    </tr>
+    <tr>
+      <td class="rowhead">4</td>
+      <td class="name">Carmen</td>
+      <td class="manana">Mañana</td>
+      <td class="conflict selected">
+        <span class="old">Libre</span>
+        <span class="new">Mañana??</span>
+      </td>
+      <td class="manana">Mañana</td>
+      <td class="tarde">Tarde</td>
+      <td class="tarde">Tarde</td>
+      <td></td>
+    </tr>
+    <tr>
+      <td class="rowhead">5</td>
+      <td class="name">Diego</td>
+      <td class="libre">Libre</td>
+      <td class="manana">Mañana</td>
+      <td class="manana">Mañana</td>
+      <td class="vac">Vacaciones</td>
+      <td class="vac">Vacaciones</td>
+      <td></td>
+    </tr>
+    <tr>
+      <td class="rowhead">6</td>
+      <td class="name">Sonia</td>
+      <td class="tarde">Tarde</td>
+      <td class="tarde">Tarde</td>
+      <td class="libre">Libre</td>
+      <td class="manana">Mañana</td>
+      <td class="manana">Mañana</td>
+      <td></td>
+    </tr>
+    <tr>
+      <td class="rowhead">7</td>
+      <td class="name">Pablo</td>
+      <td class="manana">Mañana</td>
+      <td class="manana">Mañana</td>
+      <td class="tarde">Tarde</td>
+      <td class="vac">Vacaciones</td>
+      <td></td>
+      <td></td>
+    </tr>
+  </table>
+  <div class="note" style="top: 210px; left: 140px;">quién ha tocado esto?!</div>
+  </div>
+</body>
+</html>
