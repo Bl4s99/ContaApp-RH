@@ -4,14 +4,17 @@ import sqlite3
 import tkinter as tk
 import tkinter.messagebox as messagebox
 from datetime import date, timedelta
+from pathlib import Path
 
 import pytest
 
+from app import employee_page
 from app.employee_page import (
     ChangeObjectiveStatusDialog,
     EmployeeFichaPanel,
     EmployeePage,
     EquipmentDialog,
+    GenerateDocumentDialog,
     MarkEquipmentReturnedDialog,
     ObjectiveDialog,
     PerformanceReviewDialog,
@@ -21,7 +24,7 @@ from app.employee_page import (
     _format_currency,
     _format_seniority,
 )
-from app.models import Employee, SeveranceSettlement
+from app.models import DocumentTemplate, Employee, SeveranceSettlement
 from app.repository import (
     EmployeeInput,
     ProfessionalCategoryInput,
@@ -1576,3 +1579,160 @@ class TestEquipmentSection:
         panel.show_employee(bob)
         assert panel.equipment_tree.get_children() == ()
         panel.destroy()
+
+
+def _build_repos_with_template(conn: sqlite3.Connection) -> tuple[Repositories, Employee, DocumentTemplate]:
+    repos = Repositories.create(conn)
+    dept = repos.departments.create("Ventas")
+    assert dept.id is not None
+    employee = repos.employees.create(
+        EmployeeInput(
+            first_name="Ana",
+            last_name="Lopez",
+            email="ana@example.com",
+            phone="",
+            position="Comercial",
+            department_id=dept.id,
+            salary=24000.0,
+            dependent_children=0,
+            hire_date="2022-01-01",
+        )
+    )
+    template = repos.document_templates.create(
+        "Oferta de trabajo", "Estimado/a {nombre}, le ofrecemos el puesto de {puesto}."
+    )
+    return repos, employee, template
+
+
+class TestGenerateDocumentDialogSaveAsDocument:
+    def test_stores_a_pdf_not_a_txt(
+        self, tk_root: tk.Tk, conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Antes de anadir la generacion de PDF, este boton guardaba texto
+        # plano; ahora debe guardar un PDF real con el mismo nombre de
+        # plantilla pero extension .pdf.
+        monkeypatch.setattr(messagebox, "showinfo", lambda *a, **k: None)
+        repos, employee, template = _build_repos_with_template(conn)
+        dialog = GenerateDocumentDialog(
+            tk_root, repos, employee, [template], on_change=lambda: None
+        )
+
+        dialog._handle_save_as_document()
+
+        assert employee.id is not None
+        summaries = repos.documents.list_for_employee(employee.id)
+        assert len(summaries) == 1
+        assert summaries[0].filename == f"{template.name} - {employee.full_name}.pdf"
+        stored = repos.documents.get(summaries[0].id)
+        assert stored.content.startswith(b"%PDF-")
+
+
+class TestGenerateDocumentDialogDownloadPdf:
+    def test_no_template_shows_error_and_writes_nothing(
+        self, tk_root: tk.Tk, conn: sqlite3.Connection, tmp_path: Path
+    ) -> None:
+        repos, employee, _template = _build_repos_with_template(conn)
+        dialog = GenerateDocumentDialog(tk_root, repos, employee, [], on_change=lambda: None)
+
+        dialog._handle_download_pdf()
+
+        assert dialog.error_label.cget("text") == "Seleccione una plantilla."
+        assert list(tmp_path.iterdir()) == []
+        dialog.destroy()
+
+    def test_writes_a_valid_pdf_to_the_chosen_path(
+        self,
+        tk_root: tk.Tk,
+        conn: sqlite3.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        target = tmp_path / "oferta.pdf"
+        monkeypatch.setattr(employee_page.filedialog, "asksaveasfilename", lambda **_k: str(target))
+        monkeypatch.setattr(messagebox, "showinfo", lambda *a, **k: None)
+        repos, employee, template = _build_repos_with_template(conn)
+        dialog = GenerateDocumentDialog(
+            tk_root, repos, employee, [template], on_change=lambda: None
+        )
+
+        dialog._handle_download_pdf()
+
+        assert target.read_bytes().startswith(b"%PDF-")
+        dialog.destroy()
+
+    def test_user_cancel_writes_nothing_and_shows_no_error(
+        self,
+        tk_root: tk.Tk,
+        conn: sqlite3.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        monkeypatch.setattr(employee_page.filedialog, "asksaveasfilename", lambda **_k: "")
+        error_calls: list[tuple[object, ...]] = []
+        monkeypatch.setattr(messagebox, "showerror", lambda *a, **k: error_calls.append(a))
+        repos, employee, template = _build_repos_with_template(conn)
+        dialog = GenerateDocumentDialog(
+            tk_root, repos, employee, [template], on_change=lambda: None
+        )
+
+        dialog._handle_download_pdf()
+
+        assert error_calls == []
+        assert list(tmp_path.iterdir()) == []
+        dialog.destroy()
+
+
+class TestGenerateDocumentDialogPrintPdf:
+    def test_writes_a_valid_pdf_and_calls_startfile_with_the_print_verb(
+        self,
+        tk_root: tk.Tk,
+        conn: sqlite3.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        monkeypatch.setattr(employee_page.tempfile, "gettempdir", lambda: str(tmp_path))
+        startfile_calls: list[tuple[object, ...]] = []
+        monkeypatch.setattr(employee_page.os, "startfile", lambda *a: startfile_calls.append(a))
+        monkeypatch.setattr(messagebox, "showinfo", lambda *a, **k: None)
+        repos, employee, template = _build_repos_with_template(conn)
+        dialog = GenerateDocumentDialog(
+            tk_root, repos, employee, [template], on_change=lambda: None
+        )
+
+        dialog._handle_print_pdf()
+
+        assert len(startfile_calls) == 1
+        written_path, verb = startfile_calls[0]
+        assert verb == "print"
+        written = Path(written_path)  # type: ignore[arg-type]
+        assert written.read_bytes().startswith(b"%PDF-")
+        assert written.parent == tmp_path / "contaapp_rh_print"
+        dialog.destroy()
+
+    def test_startfile_oserror_shows_error_mentioning_imprimir(
+        self,
+        tk_root: tk.Tk,
+        conn: sqlite3.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        monkeypatch.setattr(employee_page.tempfile, "gettempdir", lambda: str(tmp_path))
+
+        def _raise(*_args: object) -> None:
+            raise OSError("no application is associated with this file type")
+
+        monkeypatch.setattr(employee_page.os, "startfile", _raise)
+        error_calls: list[tuple[object, ...]] = []
+        monkeypatch.setattr(messagebox, "showerror", lambda *a, **k: error_calls.append(a))
+        repos, employee, template = _build_repos_with_template(conn)
+        dialog = GenerateDocumentDialog(
+            tk_root, repos, employee, [template], on_change=lambda: None
+        )
+
+        dialog._handle_print_pdf()
+
+        assert len(error_calls) == 1
+        title, message = error_calls[0][0], error_calls[0][1]
+        assert title == "Imprimir"
+        assert "imprimir" in str(message).lower()
+        dialog.destroy()

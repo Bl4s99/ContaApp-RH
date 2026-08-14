@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import os as os
+import tempfile as tempfile
 import tkinter as tk
 from collections.abc import Callable
-from datetime import date
+from datetime import date, datetime
 from functools import partial
 from pathlib import Path
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog as filedialog
+from tkinter import messagebox, ttk
 
 from app import theme, validation, vacation
 from app.calendar_widget import DateEntry, ScrollableFrame
 from app.data_export import export_employee_data
+from app.document_pdf import build_document_pdf
 from app.incapacidad_temporal import calculate_it_payment_breakdown
 from app.models import (
     AssignedEquipment,
@@ -22,6 +26,7 @@ from app.models import (
     SeveranceSettlement,
     Shift,
 )
+from app.pdf_common import CompanyInfo
 from app.photo_utils import (
     SUPPORTED_FILE_TYPES,
     PhotoProcessingError,
@@ -232,12 +237,14 @@ class DocumentUploadDialog(tk.Toplevel):
 
 
 class GenerateDocumentDialog(tk.Toplevel):
-    """Generar el texto base de un documento (oferta, contrato, carta de
-    baja...) a partir de una plantilla y los datos reales del empleado --
-    ver app/document_templates.py. El resultado es solo texto: se puede
-    copiar al portapapeles o guardar como un documento adjunto normal
-    (mismo camino que 'Adjuntar documento...'), no genera ningún registro
-    propio aparte."""
+    """Generar un documento (oferta, contrato, carta de baja...) a partir de
+    una plantilla y los datos reales del empleado -- ver
+    app/document_templates.py para la sustitución de {marcadores} y
+    app/document_pdf.py para la maquetación en PDF. El texto de la vista
+    previa es editable antes de generar el PDF final. Guardar como adjunto
+    reutiliza el mismo camino que 'Adjuntar documento...' (no genera ningún
+    registro propio aparte); descargar/imprimir no tocan el almacenamiento
+    de documentos del empleado en absoluto, igual que en Nóminas."""
 
     def __init__(
         self,
@@ -300,18 +307,30 @@ class GenerateDocumentDialog(tk.Toplevel):
         self.error_label = ttk.Label(frame, text="", style="Error.TLabel", wraplength=460)
         self.error_label.grid(row=4, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
+        # Cada botón en su propia fila, no varios en horizontal -- mismo
+        # criterio ya usado en el resto de la ficha (ver payroll_ui.py):
+        # empaquetar varios botones de acción uno junto a otro se recorta en
+        # ventanas/DPI más pequeños.
         button_row = ttk.Frame(frame)
         button_row.grid(row=5, column=0, columnspan=2, sticky="w", pady=(8, 0))
         ttk.Button(
             button_row,
-            text="Guardar como documento adjunto",
+            text="Guardar como documento adjunto (PDF)",
             command=self._handle_save_as_document,
             style="Accent.TButton",
-        ).pack(side="left", padx=(0, 6))
+        ).pack(side="top", anchor="w", pady=(0, 2))
+        ttk.Button(
+            button_row, text="Descargar PDF...", command=self._handle_download_pdf
+        ).pack(side="top", anchor="w", pady=(0, 2))
+        ttk.Button(
+            button_row, text="Imprimir", command=self._handle_print_pdf
+        ).pack(side="top", anchor="w", pady=(0, 2))
         ttk.Button(
             button_row, text="Copiar al portapapeles", command=self._handle_copy
-        ).pack(side="left", padx=(0, 6))
-        ttk.Button(button_row, text="Cerrar", command=self.destroy).pack(side="left")
+        ).pack(side="top", anchor="w", pady=(0, 2))
+        ttk.Button(button_row, text="Cerrar", command=self.destroy).pack(
+            side="top", anchor="w"
+        )
 
         self.bind("<Escape>", lambda _e: self.destroy())
         self.protocol("WM_DELETE_WINDOW", self.destroy)
@@ -342,17 +361,36 @@ class GenerateDocumentDialog(tk.Toplevel):
         self.clipboard_clear()
         self.clipboard_append(self.preview_text.get("1.0", "end-1c"))
 
-    def _handle_save_as_document(self) -> None:
+    def _build_document_pdf_bytes(self) -> tuple[DocumentTemplate, bytes] | None:
         template = self._selected_template()
         if template is None:
             self.error_label.configure(text="Seleccione una plantilla.")
+            return None
+        company = CompanyInfo(
+            name=self._repos.app_settings.get_company_name(),
+            nif=self._repos.app_settings.get_company_nif(),
+            ccc=self._repos.app_settings.get_company_ccc(),
+            address=self._repos.app_settings.get_company_address(),
+        )
+        pdf_bytes = build_document_pdf(
+            document_title=template.name,
+            employee_name=self._employee.full_name,
+            body_text=self.preview_text.get("1.0", "end-1c"),
+            company=company,
+            generated_at=date.today(),
+        )
+        return template, pdf_bytes
+
+    def _handle_save_as_document(self) -> None:
+        result = self._build_document_pdf_bytes()
+        if result is None:
             return
-        content = self.preview_text.get("1.0", "end-1c").encode("utf-8")
-        filename = f"{template.name} - {self._employee.full_name}.txt"
+        template, pdf_bytes = result
+        filename = f"{template.name} - {self._employee.full_name}.pdf"
         assert self._employee.id is not None
         try:
             self._repos.documents.upload(
-                self._employee.id, filename, self.category_combo.get(), content
+                self._employee.id, filename, self.category_combo.get(), pdf_bytes
             )
         except (validation.ValidationError, RepositoryError) as exc:
             self.error_label.configure(text=str(exc))
@@ -362,6 +400,74 @@ class GenerateDocumentDialog(tk.Toplevel):
             "Generar documento", "Documento guardado en Documentos.", parent=self
         )
         self.destroy()
+
+    def _handle_download_pdf(self) -> None:
+        result = self._build_document_pdf_bytes()
+        if result is None:
+            return
+        template, pdf_bytes = result
+        path_str = filedialog.asksaveasfilename(
+            title="Guardar documento en PDF",
+            defaultextension=".pdf",
+            filetypes=[("PDF", "*.pdf")],
+            initialfile=f"{template.name} - {self._employee.full_name}.pdf",
+            parent=self,
+        )
+        if not path_str:
+            return
+        try:
+            Path(path_str).write_bytes(pdf_bytes)
+        except OSError as exc:
+            messagebox.showerror("Descargar PDF", str(exc), parent=self)
+            return
+        messagebox.showinfo("Descargar PDF", "PDF generado correctamente.", parent=self)
+
+    def _handle_print_pdf(self) -> None:
+        result = self._build_document_pdf_bytes()
+        if result is None:
+            return
+        template, pdf_bytes = result
+        directory = Path(tempfile.gettempdir()) / "contaapp_rh_print"
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+            _cleanup_stale_print_files(directory)
+            temp_path = directory / (
+                f"{template.name}_{self._employee.full_name.replace(' ', '_')}_"
+                f"{datetime.now():%H%M%S%f}.pdf"
+            )
+            temp_path.write_bytes(pdf_bytes)
+        except OSError as exc:
+            messagebox.showerror("Imprimir", str(exc), parent=self)
+            return
+        try:
+            os.startfile(temp_path, "print")
+        except OSError as exc:
+            messagebox.showerror(
+                "Imprimir",
+                "No se pudo imprimir. Puede que no haya ninguna aplicación configurada "
+                f"para abrir archivos PDF en este equipo.\n\nDetalle técnico: {exc}",
+                parent=self,
+            )
+            return
+        messagebox.showinfo("Imprimir", "El documento se ha enviado a imprimir.", parent=self)
+
+
+def _cleanup_stale_print_files(directory: Path, max_age_seconds: float = 3600) -> None:
+    # Duplicado de payroll_ui.py a propósito, no importado -- evita que un
+    # módulo de UI dependa de los internos de otro. Los documentos generados
+    # aquí pueden contener DNI/domicilio, igual que las nóminas, así que no
+    # deben acumularse indefinidamente en el temporal compartido del sistema.
+    try:
+        entries = list(directory.iterdir())
+    except OSError:
+        return
+    cutoff = datetime.now().timestamp() - max_age_seconds
+    for entry in entries:
+        try:
+            if entry.is_file() and entry.stat().st_mtime < cutoff:
+                entry.unlink()
+        except OSError:
+            continue
 
 
 class WorkAccidentDialog(tk.Toplevel):
