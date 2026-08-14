@@ -69,10 +69,14 @@ def assert_foreground(tk_window: tk.Tk | tk.Toplevel) -> None:
         )
 
 
-def save_shot(bbox: tuple[int, int, int, int], out_path: Path) -> None:
+def save_shot(
+    bbox: tuple[int, int, int, int],
+    out_path: Path,
+    resize_to: tuple[int, int] | None = CANONICAL_SIZE,
+) -> None:
     img = ImageGrab.grab(bbox=bbox)
-    if img.size != CANONICAL_SIZE:
-        img = img.resize(CANONICAL_SIZE, Image.Resampling.LANCZOS)
+    if resize_to is not None and img.size != resize_to:
+        img = img.resize(resize_to, Image.Resampling.LANCZOS)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     # Capturas de UI real (tablas, texto) comprimen mal en RGB de 24 bits --
     # reducir a paleta adaptativa de 256 colores no pierde calidad visible
@@ -116,7 +120,10 @@ def main() -> None:
             login.winfo_rootx(), login.winfo_rooty(),
             login.winfo_rootx() + login.winfo_width(), login.winfo_rooty() + login.winfo_height(),
         )
-        save_shot(login_bbox, out_dir / "login.png")
+        # El dialogo de login es mucho mas pequeno y con otra proporcion que
+        # el panel de contenido -- forzarlo al tamano canonico lo estiraba y
+        # lo hacia parecer gigante. Se guarda a su tamano nativo.
+        save_shot(login_bbox, out_dir / "login.png", resize_to=None)
         login.destroy()
 
         # ---------------- MainWindow: unica raiz Tk para el resto ----------------
